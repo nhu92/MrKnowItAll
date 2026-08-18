@@ -37,8 +37,8 @@ def clade_support(
     expected: Taxonomy | None,
     k: int = 9,
     neighbors: int = 25,
-) -> tuple[float, float, float]:
-    """Return nearest similarity and weighted order/family support among top neighbors.
+) -> tuple[float, float, float, float]:
+    """Return nearest similarity and weighted order/family/genus neighbor support.
 
     A value of -1 means the expected clade is absent from this backbone locus, so it must not
     be used to reject the candidate. This is a fast alignment-neighborhood proxy; production
@@ -56,20 +56,29 @@ def clade_support(
     scored.sort(key=lambda item: item[0], reverse=True)
     nearest = scored[0][0] if scored else 0.0
     if expected is None:
-        return nearest, -1.0, -1.0
+        return nearest, -1.0, -1.0, -1.0
     top = scored[:neighbors]
     total = sum(score for score, _ in top)
     if total <= 0:
-        return nearest, 0.0, 0.0
+        return nearest, 0.0, 0.0, 0.0
     has_order = any(t.order.casefold() == expected.order.casefold() for t in all_taxa)
     has_family = any(t.family.casefold() == expected.family.casefold() for t in all_taxa)
+    has_genus = any(t.genus.casefold() == expected.genus.casefold() for t in all_taxa)
     order = sum(
         score for score, taxon in top if taxon.order.casefold() == expected.order.casefold()
     ) / total
     family = sum(
         score for score, taxon in top if taxon.family.casefold() == expected.family.casefold()
     ) / total
-    return nearest, order if has_order else -1.0, family if has_family else -1.0
+    genus = sum(
+        score for score, taxon in top if taxon.genus.casefold() == expected.genus.casefold()
+    ) / total
+    return (
+        nearest,
+        order if has_order else -1.0,
+        family if has_family else -1.0,
+        genus if has_genus else -1.0,
+    )
 
 
 def best_stop_fraction(sequence: str) -> float:
@@ -95,7 +104,7 @@ def evaluate_candidate(
     sequence = ungap(candidate.sequence)
     length_ratio = len(sequence) / max(1.0, locus.median_ungapped_length)
     ambiguity = sum(base not in "ACGT" for base in sequence.upper()) / max(1, len(sequence))
-    similarity, order_support, family_support = clade_support(
+    similarity, order_support, family_support, genus_support = clade_support(
         sequence, locus.records, expected_taxonomy
     )
     stops = best_stop_fraction(sequence)
@@ -106,6 +115,7 @@ def evaluate_candidate(
         stops,
         order_support,
         family_support,
+        genus_support,
         duplicate_count,
     )
 
@@ -122,7 +132,10 @@ def evaluate_candidate(
         reasons.append("excess stop codons in every translated frame")
     if order_support >= 0 and order_support < 0.15:
         reasons.append("top backbone neighbors give less than 15% support to the expected order")
-    if family_support >= 0 and family_support < 0.05:
+    # Historical backbones can use a former family circumscription (for example Allium in
+    # Alliaceae versus current APG/Kew Asparagaceae). Strong same-genus support supersedes a
+    # family-name mismatch; otherwise the family gate remains active.
+    if family_support >= 0 and family_support < 0.05 and genus_support < 0.05:
         reasons.append("top backbone neighbors give less than 5% support to the expected family")
 
     length_score = math.exp(-abs(math.log(max(length_ratio, 1e-6))))
@@ -130,7 +143,7 @@ def evaluate_candidate(
     stop_score = max(0.0, 1.0 - stops / 0.08)
     duplicate_penalty = 1.0 / math.sqrt(max(1, duplicate_count))
     clade_score = max(
-        value for value in (order_support, family_support, 0.5) if value >= 0
+        value for value in (order_support, family_support, genus_support, 0.5) if value >= 0
     )
     score = (
         0.25 * length_score

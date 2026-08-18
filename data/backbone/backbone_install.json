@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "source_archive": "angiosperms_353_v2_interim_targetfile_gene_alignments.zip",
+  "source_sha256": "42b0c210961c13376c8e01f8a2673148cd4f6a330e5b7b2deca6ae51d3819931",
+  "summary_files": [
+    "gene_summary.csv",
+    "species_summary.csv"
+  ],
+  "locus_count": 353,
+  "sequence_count": 188167,
+  "specimen_count": 821,
+  "species_count": 809,
+  "order_count": 61,
+  "family_count": 309
+}

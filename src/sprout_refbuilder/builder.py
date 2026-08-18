@@ -23,6 +23,7 @@ class ReferenceBuilder:
         prefer_mafft: bool = True,
         ml_model: Path | None = None,
         ml_min_score: float = -0.05,
+        create_archive: bool = True,
     ) -> None:
         self.backbone = Backbone(backbone_dir)
         self.output_dir = output_dir
@@ -30,6 +31,7 @@ class ReferenceBuilder:
         self.prefer_mafft = prefer_mafft
         self.ml_model = ml_model
         self.ml_min_score = ml_min_score
+        self.create_archive = create_archive
 
     def build_from_kew(self, taxon: str, client: KewClient) -> BuildReport:
         metadata = client.sync()
@@ -167,4 +169,5 @@ class ReferenceBuilder:
             json.dumps(report.to_dict(), indent=2), encoding="utf-8"
         )
         # Write the report first and keep the archive outside its source directory.
-        shutil.make_archive(str(self.output_dir) + "_bundle", "zip", self.output_dir)
+        if self.create_archive:
+            shutil.make_archive(str(self.output_dir) + "_bundle", "zip", self.output_dir)

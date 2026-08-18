@@ -11,3 +11,5 @@ def test_home_and_unconfigured_build(monkeypatch, tmp_path) -> None:
     assert health["backbone_ready"] is False
     response = client.post("/api/build", json={"taxon": "Abatia rugosa"})
     assert response.status_code == 503
+    panel = client.post("/api/panel", json={"level": "family", "parent_taxa": ["Rosales"]})
+    assert panel.status_code == 503

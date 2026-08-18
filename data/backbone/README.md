@@ -1,9 +1,21 @@
-# Curated 871-species backbone
+# Curated Angiosperms353 backbone
 
-Put the SPrOUT curated alignments here (one aligned FASTA per Angiosperms353 gene,
-named `<gene_id>.fasta`). Large biological data are intentionally not copied into the
-source distribution because the full 871 × 353 resource is not present in the public
-SPrOUT repository and its redistribution terms cannot be inferred.
+The supplied interim archive was audited as 353 aligned loci, 188,167 locus sequences,
+821 specimen/source entries and 809 unique binomial names. The two CSV summaries and a
+checksum manifest are versioned here; the approximately 189 MB of uncompressed FASTA is
+kept outside ordinary Git history.
+
+Install or reproduce the local backbone from the original ZIP:
+
+```bash
+sprout-ref install-backbone \
+  --archive /path/to/angiosperms_353_v2_interim_targetfile_gene_alignments.zip \
+  --destination data/backbone
+```
+
+Add `--overwrite` only when intentionally replacing an existing local installation.
+The installer extracts only recognized FASTA/CSV files, flattens paths safely, checks
+the 353-locus invariant and records the source SHA-256 in `backbone_install.json`.
 
 Validate the installed resource with:
 
@@ -11,7 +23,5 @@ Validate the installed resource with:
 sprout-ref inspect-backbone data/backbone
 ```
 
-The public SPrOUT repository currently exposes demonstration panels for 50 genes, with
-106 order-level and 298 family-level references. Those are useful for a smoke test but
-must not be described as the full 871-species backbone.
-
+The original working description called this an “871 × 353” collection; the counts
+above are the reproducible counts from the supplied archive and are used by this repo.

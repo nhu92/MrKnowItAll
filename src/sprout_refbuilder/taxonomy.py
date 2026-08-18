@@ -1,9 +1,20 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from .models import Taxonomy
+
+
+@dataclass(frozen=True)
+class KewTreeTaxon:
+    taxonomy: Taxonomy
+    sequence_id: str
+
+    @property
+    def scientific_name(self) -> str:
+        return f"{self.taxonomy.genus} {self.taxonomy.species}"
 
 
 def taxonomy_from_kew_tree(tree_path: Path, scientific_name: str, sequence_id: str = "") -> Taxonomy:
@@ -36,6 +47,27 @@ def taxonomy_from_header(description: str) -> Taxonomy | None:
     if len(tokens) < 4:
         return None
     return Taxonomy(tokens[0], tokens[1], tokens[2], tokens[3])
+
+
+def read_kew_tree_taxa(tree_path: Path) -> list[KewTreeTaxon]:
+    """Parse Kew's documented five-field leaf labels from a Newick species tree."""
+    text = tree_path.read_text(encoding="utf-8")
+    labels = re.findall(r"(?:^|[(,])([^(),;]+?)(?=[,)])", text)
+    taxa: list[KewTreeTaxon] = []
+    for label in labels:
+        fields = label.split("_", 4)
+        if len(fields) != 5:
+            continue
+        order, family, genus, species, sequence_id = fields
+        taxa.append(KewTreeTaxon(Taxonomy(order, family, genus, species), sequence_id))
+    return taxa
+
+
+def kew_taxonomy_index(tree_path: Path) -> dict[str, list[KewTreeTaxon]]:
+    index: dict[str, list[KewTreeTaxon]] = {}
+    for taxon in read_kew_tree_taxa(tree_path):
+        index.setdefault(taxon.scientific_name.casefold(), []).append(taxon)
+    return index
 
 
 def _binomial(name: str) -> tuple[str, str]:

@@ -23,10 +23,14 @@ conda activate sprout-refbuilder
 pip install -e .
 ```
 
-把完整的 871 物种、353 gene 校对 alignment 放到 `data/backbone/`。公开 SPrOUT 仓库目前只带
-50 genes 的演示面板，并不等于完整 871 骨架。
+用原始 ZIP 安装你提供的完整骨架；程序会检查 alignment 等宽和 353-locus 不变量，并生成
+SHA-256 清单。实际审计结果是 188,167 条 locus sequences、821 个 specimen/source entries、
+809 个唯一 binomials（不是工作描述中的 871 个唯一物种）。
 
 ```bash
+sprout-ref install-backbone \
+  --archive /path/to/angiosperms_353_v2_interim_targetfile_gene_alignments.zip \
+  --destination data/backbone
 sprout-ref inspect-backbone data/backbone
 sprout-ref sync
 sprout-ref search "Abatia rugosa"
@@ -34,6 +38,28 @@ sprout-ref build \
   --taxon "Abatia rugosa" \
   --backbone data/backbone \
   --output runs/abatia-rugosa
+```
+
+### 分层 reference panel
+
+完整骨架安装后可按上一级 SPrOUT call 构建更窄的 reference：
+
+```bash
+sprout-ref build-panel --level order \
+  --backbone data/backbone --summary data/backbone/species_summary.csv \
+  --output runs/order
+
+sprout-ref build-panel --level family \
+  --parent-taxon Asparagales --parent-taxon Brassicales --parent-taxon Rosales \
+  --backbone data/backbone --summary data/backbone/species_summary.csv \
+  --output runs/family
+```
+
+mix7 受控 demo 见 [examples/mix7](examples/mix7/README.md)，或运行：
+
+```bash
+sprout-ref demo-mix7 --backbone data/backbone \
+  --summary data/backbone/species_summary.csv --output runs/mix7-demo
 ```
 
 可选的自动异常模型：`sprout-ref train-qc --backbone data/backbone --output data/qc.joblib`，
@@ -65,12 +91,14 @@ python 02_exon_trees.py \
 ## Web app
 
 ```bash
-export SPROUT_REF_BACKBONE=/absolute/path/to/871-alignments
+export SPROUT_REF_BACKBONE=/absolute/path/to/353-alignments
+export SPROUT_REF_SPECIES_SUMMARY=/absolute/path/to/species_summary.csv
 export SPROUT_REF_WORK_DIR=/absolute/path/to/runs
 sprout-ref web --host 127.0.0.1 --port 8000
 ```
 
-打开 <http://127.0.0.1:8000>。Web API 包括 taxon 搜索、后台构建、状态轮询和 ZIP 下载。
+打开 <http://127.0.0.1:8000>。Web UI/API 支持精确物种构建、order/family/genus panel、Kew
+物种整合、后台状态轮询和 ZIP 下载。
 
 ## 本地 reads 模式
 
@@ -95,9 +123,14 @@ pytest
 ruff check src tests
 ```
 
+完整骨架上的 mix7 受控 demo 实测生成三个 353-locus 等宽 reference panel。Kew Release 4.0
+精确序列自动 QC 的接受数为：Allium sativum 281、Asparagus officinalis 347、Brassica oleracea
+350、Artocarpus heterophyllus 349。该 demo 没有 mix7 FASTQ，因此 order/family calls 是按已知正确
+上游结果模拟的；它验证的是分层建库与 Kew integration，不应被表述成盲样分类结果。
+
 ## 数据与引用
 
-软件代码为 MIT。Kew、SPrOUT、Angiosperms353 target 和你的 871 骨架各自保留原始许可与引用
+软件代码为 MIT。Kew、SPrOUT、Angiosperms353 target 和你的校对骨架各自保留原始许可与引用
 要求；构建结果的 `report.json` 保存 Kew release、accession 和处理方法。请引用：
 
 - [Kew Tree of Life Explorer public releases](https://sftp.kew.org/pub/treeoflife/)

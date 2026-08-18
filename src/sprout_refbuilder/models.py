@@ -37,6 +37,7 @@ class SequenceFeatures:
     stop_codon_fraction: float
     order_support: float
     family_support: float
+    genus_support: float
     duplicate_count: int
 
     def vector(self) -> list[float]:
@@ -47,6 +48,7 @@ class SequenceFeatures:
             self.stop_codon_fraction,
             self.order_support,
             self.family_support,
+            self.genus_support,
             float(self.duplicate_count),
         ]
 

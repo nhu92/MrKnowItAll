@@ -59,7 +59,7 @@ flowchart TD
   C -- "否，且无 reads" --> X["停止；返回近似名称/代理面板建议"]
   D --> F["按稳定 gene ID 分组"]
   E --> F
-  G["871 物种 × 353 gene 校对 alignment"] --> H["每 locus 特征与邻域"]
+  G["校对骨架：821 entries / 809 binomials × 353 loci"] --> H["每 locus 特征与邻域"]
   F --> I["候选 copy 自动评分与 hard gates"]
   H --> I
   I --> J{"通过 QC?"}
@@ -75,18 +75,20 @@ flowchart TD
 同一 specimen、同一 gene 可能因旁系同源、contig 分裂或多次 sequencing run 得到多个候选。
 对每个候选计算：
 
-- `length_ratio`：候选 ungapped 长度 / 871 骨架该 locus 中位数；
+- `length_ratio`：候选 ungapped 长度 / 校对骨架该 locus 中位数；
 - `ambiguity_fraction`：非 A/C/G/T 比例；
 - `nearest_kmer_similarity`：与骨架最近序列的 9-mer Jaccard；
 - `stop_codon_fraction`：正反链六个 frame 中最低 stop 比例；
 - `duplicate_count`：该 locus 的候选数，作为 copy 冲突惩罚；
-- `order_support` / `family_support`：top-25 骨架 k-mer 邻居对 Kew 预期 clade 的相似度加权投票；
+- `order_support` / `family_support` / `genus_support`：top-25 骨架 k-mer 邻居对 Kew 预期
+  clade 的相似度加权投票；同属高支持可覆盖旧骨架与当前 APG/Kew family 名称变化（例如旧
+  Alliaceae 与当前 Asparagaceae），但不能覆盖 order 冲突；
 - 生产增强项：mean depth、coverage uniformity、allele balance、HybPiper paralog warning、terminal
   branch z-score、与 species-tree placement 的 RF/quartet 冲突。
 
 目前原型 hard gates 为：长度比 0.35–2.0、N/ambiguity ≤15%、9-mer similarity ≥0.015、最佳
 frame stop ≤8%、top-neighbor order support ≥15%、family support ≥5%、综合分 ≥0.50。若该 locus
-骨架中完全没有预期 order/family，则相应 gate 自动跳过。阈值是保守起点，不是普适真理；应用完整 871 数据做
+骨架中完全没有预期 order/family，则相应 gate 自动跳过。阈值是保守起点，不是普适真理；应用完整骨架做
 leave-one-taxon-out calibration 后，应按 locus 或 clade 调整。
 
 候选失败时不人工改碱基、不补 consensus，只把该 gene 的原骨架 alignment 原样复制，并在
@@ -95,7 +97,7 @@ leave-one-taxon-out calibration 后，应按 locus 或 clade 调整。
 ### 4.2 加入 alignment
 
 生产默认执行 MAFFT `--addfragments --keeplength`，将目标序列投影到已经人工校对的 alignment
-坐标，不重新扰动 871 骨架。这样避免全量 re-alignment 引起列漂移，也与 SPrOUT 随后的
+坐标，不重新扰动校对骨架。这样避免全量 re-alignment 引起列漂移，也与 SPrOUT 随后的
 `--addfragments` 逻辑一致。没有 MAFFT 时，纯 Python fallback：选择 k-mer 最近的骨架模板，做
 global pairwise alignment，再把候选碱基投影到模板的已有 alignment 列；相对模板的 insertion
 被丢弃。fallback 适合测试，正式 release 应使用 MAFFT 并记录版本。
@@ -116,9 +118,9 @@ global pairwise alignment，再把候选碱基投影到模板的已有 alignment
 
 机器学习适合做异常检测和阈值校准，不适合生成 reference 碱基。
 
-仓库的 `train-qc` 可在 871 校对骨架及其模拟 0.4/0.6/0.8 长度合法片段上训练 Isolation
+仓库的 `train-qc` 可在校对骨架及其模拟 0.4/0.6/0.8 长度合法片段上训练 Isolation
 Forest（1% training contamination）。构建时默认只把 decision score `< -0.05` 的强异常作为
-额外 reject；该值必须用完整 871 数据和独立样本校准。更成熟的模型应使用
+额外 reject；该值必须用完整骨架和独立样本校准。更成熟的模型应使用
 leave-one-species/genus-out，避免同一 clade 泄漏到 train/test；输入包括上述序列特征，再加 reads
 depth、mapping quality、copy number、gene-tree placement 和跨 gene 一致性。推荐两个层次：
 
@@ -130,11 +132,12 @@ depth、mapping quality、copy number、gene-tree placement 和跨 gene 一致�
 自动处理（默认拒绝或降为 genus-level），不要求人工操作。评估指标应包括 false inclusion rate、
 species/genus recall、expected calibration error，以及对 SPrOUT 混合样本最终 precision/recall 的影响。
 
-## 6. 871 骨架的处理
+## 6. 校对骨架的处理
 
-完整资源不在当前公开 SPrOUT GitHub 中。公开仓库能看到 50-gene demo：106 个 order-level 和
-298 个 family-level reference；不能把它误称为 871 × 353。软件因此提供严格导入契约，而不在
-未经许可时复制大数据：
+已对用户提供的 interim ZIP 做可复现审计：353 loci、188,167 条 locus sequences、821 个
+specimen/source entries、809 个唯一 binomials、61 orders、309 families。此前“871 × 353”是工作
+描述，不是这个文件可复现出的唯一物种数。仓库提交 CSV 摘要和 checksum manifest，不把约
+189 MB 解压 FASTA 混进普通 Git 历史；`install-backbone` 从原始 ZIP 安全重建：
 
 - 每 gene 一个 `<gene_id>.fasta`；
 - 文件内所有记录必须等宽；
@@ -142,9 +145,9 @@ species/genus recall、expected calibration error，以及对 SPrOUT 混合样�
 - gene ID 与 Kew/Angiosperms353 stable ID 一致；
 - `inspect-backbone` 生成 locus/header 数和 gene list，可在 CI 中断言应为 353 loci。
 
-拿到你的完整 871 资源后，把它作为带版本号的 Git LFS/Zenodo release 或安装时下载的数据包，
-记录 checksum、来源、许可、物种清单、alignment 软件版本和人工校对版本。代码 repo 不应该偷偷
-混入无法追溯的大 FASTA。
+若确认许可允许公开 FASTA，后续可将 ZIP 作为带版本号的 GitHub/Zenodo release asset 或 Git LFS
+对象发布；无论采用哪种方式，都应保留 checksum、来源、许可、物种清单、alignment 软件版本和
+校对版本。当前 `backbone_install.json` 已固定本次原始 ZIP 的 SHA-256。
 
 ## 7. 输出、可追溯性和失败语义
 
@@ -162,7 +165,7 @@ species/genus recall、expected calibration error，以及对 SPrOUT 混合样�
 ## 8. 扩展到 20,000+ 物种
 
 单物种按需构建无需建立 20,000 × 353 的重复文件。建议保存一个只读对象层：Kew recovery 按
-accession 缓存，871 backbone 只存一次，build bundle 用 hardlink/content-addressed object 或按需
+accession 缓存，curated backbone 只存一次，build bundle 用 hardlink/content-addressed object 或按需
 ZIP。批量预计算时以 `(Kew release, backbone version, accession, QC config hash)` 为 cache key。
 
 服务层建议：FastAPI 只提交任务；Celery/RQ + Redis 排队；每个 job 写独立目录；对象存储保存
@@ -173,12 +176,25 @@ bundle；SQLite/PostgreSQL 保存 manifest/QC；限制并发下载并尊重 Kew 
 ## 9. 验证计划
 
 1. **软件测试**：FASTA、manifest、tree label、候选仲裁、alignment 等宽、输出契约。
-2. **leave-one-out**：从 871 骨架移除一个物种，仅用其 Kew recovery 重建，比较 identity、gap
+2. **leave-one-out**：从校对骨架移除一个物种，仅用其 Kew recovery 重建，比较 identity、gap
    pattern、tree placement；按 family 分层报告。
 3. **扰动测试**：注入 truncation、N、chimera、reverse complement、paralog，测自动拒绝率。
 4. **SPrOUT 端到端**：用原论文人工 mixture 和独立 mixture；比较旧 reference 与动态 reference 的
    order/family/genus/species precision、recall、false positive rate。
 5. **盲测**：按 genus 阻断 train/test，确认 ML 没有靠近缘样本泄漏获得虚高结果。
+
+### 9.1 mix7 实测
+
+在 Kew Release 4.0 和本次 353-locus 骨架上，order、family、genus 三个 panel 均输出 353 个
+等宽 FASTA。精确物种 recovery 的自动接受/拒绝/缺失 loci 分别为：Allium sativum
+281/30/42、Asparagus officinalis 347/2/4、Brassica oleracea 350/0/3、Artocarpus
+heterophyllus 349/2/2。Allium 的主要 rejection 原因是 recovered fragment 短于该 locus 骨架
+中位长度的 35%。没有人工校对或自动改写碱基；失败 locus 保留原 skeleton 并记录理由。
+
+需要严格限定这个结果的含义：用户给的是成分截图而不是 mix7 FASTQ，因此本 demo 模拟正确的
+order/family 上游 calls，并只在 genus 阶段加入截图中的四个精确物种。它验证 reference construction
+与 Kew integration，不验证从未知 reads 盲识别这四个物种。后者仍需原始 FASTQ 跑 SPrOUT
+端到端 benchmark。
 
 ## 10. 主要来源
 
