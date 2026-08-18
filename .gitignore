@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+runs/
+*.egg-info/
+data/backbone/*.fa*
+!data/backbone/README.md
+

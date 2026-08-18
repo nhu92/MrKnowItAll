@@ -1,0 +1,10 @@
+name: sprout-refbuilder
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - mafft>=7.526
+  - hybpiper>=2.2
+  - bwa
+  - pip
