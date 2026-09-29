@@ -79,25 +79,27 @@ sprout-ref demo-mix7 --backbone data/backbone \
 sprout-ref build-kew-panel --level family \
   --parent-file sprout_test.order_candidates.txt \
   --backbone data/backbone --output runs/sprout_test-family-kew \
-  --representatives 4
+  --representatives 4 --threads 16
 
 # family 结果出来后，为候选 families 构建 genus reference
 sprout-ref build-kew-panel --level genus \
   --parent-file sprout_test.family_candidates.txt \
   --backbone data/backbone --output runs/sprout_test-genus-kew \
-  --representatives 2
+  --representatives 2 --threads 16
 
 # genus 结果出来后，纳入候选 genera 中每个有 recovery 的物种
 sprout-ref build-kew-panel --level species \
   --parent-file sprout_test.genus_candidates.txt \
   --backbone data/backbone --output runs/sprout_test-species-kew \
-  --representatives 1
+  --representatives 1 --threads 16
 ```
 
 每一步的 `ref/` 传给 SPrOUT `02_exon_trees.py -r`，`gene.list.txt` 传给 `-g`。程序先以完整
 校对骨架执行自动 QC 和 alignment projection，最终 panel 只保留本层 KEW references；缺少精确
 recovery 的物种不会被近缘 consensus 冒名代替。`selection.tsv`、`qc.json` 和
 `panel_report.json` 保存下载 accession、接受位点数及完整 provenance。
+QC 和 alignment 均按 locus 多进程并行；HPC 上将 `--threads` 设为 Slurm 分配的 CPU 数。每个
+MAFFT 子进程固定使用 1 核，避免“进程数 × MAFFT 线程数”的嵌套超配。
 
 UMD Zaratan 上对原始 SPrOUT 50-gene 示例做隔离 smoke test 的 Slurm 脚本见
 [examples/hpc](examples/hpc/README.md)。它使用独立输出目录，并限制嵌套 MAFFT 并发以避免超配。

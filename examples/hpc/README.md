@@ -55,3 +55,8 @@ cd "$run"
 bash -n ttu_kew_family_refinement.sbatch
 sbatch ttu_kew_family_refinement.sbatch
 ```
+
+The Kew reference builder runs the 353 independent locus-QC and MAFFT jobs with one process per
+allocated CPU (`--threads 16` by default on this script). Each MAFFT process uses one thread, so
+the job stays within its Slurm allocation. Override with `SPROUT_REF_BUILD_WORKERS`; progress is
+printed after every ten completed loci.

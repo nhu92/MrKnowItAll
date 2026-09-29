@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from sprout_refbuilder.clade import BalancedKewPanelBuilder, read_taxon_candidates
 from sprout_refbuilder.models import KewRecord
 
@@ -51,7 +53,8 @@ def test_read_taxon_candidates_from_txt_and_csv(tmp_path: Path) -> None:
     assert read_taxon_candidates(csv_path, minimum_z=1.0) == ["Rosales"]
 
 
-def test_build_balanced_family_panel(tmp_path: Path) -> None:
+@pytest.mark.parametrize("workers", [1, 2])
+def test_build_balanced_family_panel(tmp_path: Path, workers: int) -> None:
     backbone = tmp_path / "backbone"
     sequence = "ATG" + "ACG" * 40 + "TAA"
     write(
@@ -68,11 +71,13 @@ def test_build_balanced_family_panel(tmp_path: Path) -> None:
         minimum_recovered_loci=1,
         prefer_mafft=False,
         download_workers=1,
+        workers=workers,
     ).build("family", ["Rosales"], client)  # type: ignore[arg-type]
 
     alignment = (output / "ref" / "4691.fasta").read_text(encoding="utf-8")
     assert report["selected_groups"] == 2
     assert report["loci"] == 1
+    assert report["workers"] == workers
     assert report["selection"][0]["scientific_name"].startswith("Genus")
     assert " " in report["selection"][0]["species"]
     assert alignment.count(">") == 2

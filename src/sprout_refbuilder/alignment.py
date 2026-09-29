@@ -52,6 +52,8 @@ def _mafft_add(locus: LocusBackbone, candidate: FastaRecord) -> list[FastaRecord
         command = [
             "mafft",
             "--quiet",
+            "--thread",
+            "1",
             "--preservecase",
             "--addfragments",
             str(candidate_file),
@@ -76,6 +78,8 @@ def _mafft_add_many(locus: LocusBackbone, candidates: list[FastaRecord]) -> list
         command = [
             "mafft",
             "--quiet",
+            "--thread",
+            "1",
             "--preservecase",
             "--addfragments",
             str(candidate_file),

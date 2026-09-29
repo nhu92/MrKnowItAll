@@ -14,7 +14,7 @@ from .clade import BalancedKewPanelBuilder
 from .kew import KewClient
 from .panel import HierarchicalPanelBuilder
 
-app = FastAPI(title="SPrOUT Reference Builder", version="0.2.1")
+app = FastAPI(title="SPrOUT Reference Builder", version="0.2.2")
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 
@@ -37,6 +37,7 @@ class KewPanelRequest(BaseModel):
     parent_taxa: list[str] = Field(min_length=1)
     representatives: int = Field(default=4, ge=1, le=20)
     minimum_recovered_loci: int = Field(default=50, ge=1, le=353)
+    workers: int = Field(default=1, ge=1, le=64)
 
 
 def settings() -> tuple[Path, Path, Path, Path | None]:
@@ -202,6 +203,7 @@ def _run_kew_panel(job_id: str, request: KewPanelRequest) -> None:
                 output,
                 representatives_per_taxon=request.representatives,
                 minimum_recovered_loci=request.minimum_recovered_loci,
+                workers=request.workers,
             ).build(request.level, request.parent_taxa, client)
         bundle = Path(str(output) + "_bundle.zip")
         with _lock:

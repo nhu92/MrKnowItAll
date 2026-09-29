@@ -24,8 +24,9 @@ def kmers(sequence: str, k: int = 9) -> frozenset[str]:
 
 
 def jaccard(left: frozenset[str], right: frozenset[str]) -> float:
-    union = left | right
-    return len(left & right) / len(union) if union else 0.0
+    intersection = len(left & right)
+    union_size = len(left) + len(right) - intersection
+    return intersection / union_size if union_size else 0.0
 
 
 def nearest_similarity(sequence: str, references: Iterable[FastaRecord], k: int = 9) -> float:

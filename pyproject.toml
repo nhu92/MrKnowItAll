@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sprout-refbuilder"
-version = "0.2.1"
+version = "0.2.2"
 description = "Automatic PAFTOL/Kew Angiosperms353 reference builder for SPrOUT"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -104,6 +104,12 @@ def parser() -> argparse.ArgumentParser:
     kew_panel.add_argument("--minimum-recovered-loci", type=int, default=50)
     kew_panel.add_argument("--minimum-score", type=float, default=0.50)
     kew_panel.add_argument("--download-workers", type=int, default=4)
+    kew_panel.add_argument(
+        "--threads",
+        type=int,
+        default=1,
+        help="Parallel locus workers for QC and alignment (use allocated HPC CPUs)",
+    )
     kew_panel.add_argument("--python-aligner", action="store_true")
 
     demo = commands.add_parser("demo-mix7", help="Build the controlled mix7 hierarchy demo")
@@ -200,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
                 minimum_score=args.minimum_score,
                 prefer_mafft=not args.python_aligner,
                 download_workers=args.download_workers,
+                workers=args.threads,
             ).build(args.level, parents, client)
             print(json.dumps(report, indent=2))
             return 0

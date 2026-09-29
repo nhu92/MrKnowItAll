@@ -20,6 +20,7 @@ CONDA_SH=${SPROUT_CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}
 CONDA_ENV=${SPROUT_CONDA_ENV:-sprout}
 PROJECT=${SPROUT_PROJECT:-sprout_test_kew_family}
 THREADS=${SPROUT_TREE_WORKERS:-4}
+BUILD_WORKERS=${SPROUT_REF_BUILD_WORKERS:-${SLURM_CPUS_PER_TASK:-16}}
 RUN=${SPROUT_REFINEMENT_RUN:-$PWD}
 
 cd "$RUN"
@@ -45,10 +46,12 @@ backbone_count=$(find "$MRKNOWITALL_BACKBONE" -maxdepth 1 -type f -name '*.fasta
 
 source "$CONDA_SH"
 conda activate "$CONDA_ENV"
-python -m pip install -e "$MRKNOWITALL_SOURCE"
+python -m pip install -e "${MRKNOWITALL_SOURCE}[dev]"
 for tool in python mafft fasttree trimal; do
   command -v "$tool" || { echo "Missing required tool: $tool" >&2; exit 127; }
 done
+python -m pytest -q "$MRKNOWITALL_SOURCE/tests"
+ruff check "$MRKNOWITALL_SOURCE/src" "$MRKNOWITALL_SOURCE/tests"
 
 {
   echo "started=$(date -Is)"
@@ -58,6 +61,7 @@ done
   echo "sprout_test_run=$SPROUT_TEST_RUN"
   echo "mrknowitall_source=$MRKNOWITALL_SOURCE"
   echo "backbone=$MRKNOWITALL_BACKBONE"
+  echo "reference_build_workers=$BUILD_WORKERS"
   git -C "$SPROUT_SOURCE" rev-parse HEAD | sed 's/^/sprout_commit=/'
   git -C "$MRKNOWITALL_SOURCE" rev-parse HEAD | sed 's/^/mrknowitall_commit=/'
 } | tee RUN_PROVENANCE.txt
@@ -70,7 +74,8 @@ sprout-ref build-kew-panel \
   --representatives 4 \
   --pool-multiplier 2 \
   --minimum-recovered-loci 50 \
-  --download-workers 4
+  --download-workers 4 \
+  --threads "$BUILD_WORKERS"
 
 cp "$SPROUT_TEST_RUN/gene_list.txt" gene_list.txt
 python "$SPROUT_SOURCE/02_exon_trees.py" \

@@ -4,14 +4,16 @@ import csv
 import json
 import shutil
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from statistics import median
 from typing import ClassVar
 
 from .alignment import add_many_to_alignment
-from .backbone import Backbone
-from .fasta import FastaRecord, parse_kew_gene_id, read_fasta, write_fasta
+from .backbone import Backbone, LocusBackbone
+from .fasta import FastaRecord, parse_kew_gene_id, read_fasta, ungap, write_fasta
 from .kew import KewClient
 from .models import KewRecord, Taxonomy
 from .qc import choose_candidate
@@ -24,6 +26,82 @@ class CladeRecovery:
     taxonomy: Taxonomy
     path: Path
     recovered_loci: int
+
+
+def _load_locus(path: Path) -> LocusBackbone:
+    """Load one locus inside a worker instead of copying the full backbone to every process."""
+    records = tuple(read_fasta(path))
+    if not records:
+        raise ValueError(f"Backbone locus is empty: {path}")
+    widths = {len(record.sequence) for record in records}
+    if len(widths) != 1:
+        raise ValueError(f"Backbone file is not aligned (unequal widths): {path}")
+    lengths = [len(ungap(record.sequence)) for record in records]
+    return LocusBackbone(path.stem, path, records, widths.pop(), median(lengths))
+
+
+def _evaluate_locus(
+    job: tuple[
+        str,
+        Path,
+        str,
+        float,
+        list[tuple[CladeRecovery, list[FastaRecord]]],
+    ],
+) -> tuple[str, list[tuple[FastaRecord, str]], list[dict]]:
+    """Evaluate all Kew candidates for one locus in one process.
+
+    Keeping every candidate for a locus together lets the process-local k-mer cache reuse the
+    curated backbone features across all recoveries.
+    """
+    gene_id, locus_path, level, minimum_score, entries = job
+    locus = _load_locus(locus_path)
+    accepted: list[tuple[FastaRecord, str]] = []
+    qc_rows: list[dict] = []
+    for recovery, raw in entries:
+        chosen, best_qc, evaluated = choose_candidate(
+            raw,
+            locus,
+            minimum_score=minimum_score,
+            expected_taxonomy=recovery.taxonomy,
+        )
+        for sequence, qc in evaluated:
+            qc_rows.append(
+                {
+                    "gene_id": gene_id,
+                    "sequence_id": recovery.record.sequence_id,
+                    "scientific_name": recovery.record.species,
+                    "target_group": getattr(recovery.taxonomy, level),
+                    "candidate": sequence.id,
+                    **qc.to_dict(),
+                }
+            )
+        if chosen is None or best_qc is None:
+            continue
+        header = f"{recovery.taxonomy.sprout_prefix}_KEW_{recovery.record.sequence_id}"
+        accepted.append((FastaRecord(header, header, chosen.sequence), recovery.record.sequence_id))
+    return gene_id, accepted, qc_rows
+
+
+def _align_locus(
+    job: tuple[str, Path, list[FastaRecord], bool, Path],
+) -> tuple[str, str, int]:
+    """Align and write one final panel locus in an isolated process."""
+    gene_id, locus_path, candidates, prefer_mafft, output_path = job
+    locus = _load_locus(locus_path)
+    aligned, method = add_many_to_alignment(locus, candidates, prefer_mafft)
+    wanted_ids = {sequence.id for sequence in candidates}
+    panel_records = [sequence for sequence in aligned if sequence.id in wanted_ids]
+    if len(panel_records) != len(candidates):
+        raise RuntimeError(f"Lost a Kew reference while aligning locus {gene_id}")
+    write_fasta(output_path, panel_records)
+    return gene_id, method, len(panel_records)
+
+
+def _progress(stage: str, completed: int, total: int) -> None:
+    if completed == 1 or completed == total or completed % 10 == 0:
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        print(f"[{timestamp}] {stage}: {completed}/{total} loci completed", flush=True)
 
 
 def read_taxon_candidates(path: Path, minimum_z: float | None = None, top: int = 0) -> list[str]:
@@ -75,6 +153,7 @@ class BalancedKewPanelBuilder:
         minimum_score: float = 0.50,
         prefer_mafft: bool = True,
         download_workers: int = 4,
+        workers: int = 1,
     ) -> None:
         if representatives_per_taxon < 1:
             raise ValueError("representatives_per_taxon must be positive")
@@ -88,6 +167,7 @@ class BalancedKewPanelBuilder:
         self.minimum_score = minimum_score
         self.prefer_mafft = prefer_mafft
         self.download_workers = max(1, download_workers)
+        self.workers = max(1, workers)
 
     def build(self, level: str, parent_taxa: list[str], client: KewClient) -> dict:
         level = level.casefold()
@@ -118,38 +198,30 @@ class BalancedKewPanelBuilder:
                 per_gene[parse_kew_gene_id(sequence)].append(sequence)
             recovery_sequences[recovery.record.sequence_id] = per_gene
 
+        recovery_by_id = {item.record.sequence_id: item for item in recoveries}
         qc_rows: list[dict] = []
         accepted_per_record: dict[str, int] = defaultdict(int)
         accepted_by_gene: dict[str, list[tuple[FastaRecord, CladeRecovery]]] = defaultdict(list)
+        evaluation_jobs = []
         for gene_id, locus in sorted(self.backbone.loci.items()):
-            for recovery in recoveries:
-                raw = recovery_sequences[recovery.record.sequence_id].get(gene_id, [])
-                chosen, best_qc, evaluated = choose_candidate(
-                    raw,
-                    locus,
-                    minimum_score=self.minimum_score,
-                    expected_taxonomy=recovery.taxonomy,
+            entries = [
+                (
+                    recovery,
+                    recovery_sequences[recovery.record.sequence_id].get(gene_id, []),
                 )
-                for sequence, qc in evaluated:
-                    qc_rows.append(
-                        {
-                            "gene_id": gene_id,
-                            "sequence_id": recovery.record.sequence_id,
-                            "scientific_name": recovery.record.species,
-                            "target_group": getattr(recovery.taxonomy, level),
-                            "candidate": sequence.id,
-                            **qc.to_dict(),
-                        }
-                    )
-                if chosen is None or best_qc is None:
-                    continue
-                header = (
-                    f"{recovery.taxonomy.sprout_prefix}_KEW_{recovery.record.sequence_id}"
-                )
-                accepted_by_gene[gene_id].append(
-                    (FastaRecord(header, header, chosen.sequence), recovery)
-                )
-                accepted_per_record[recovery.record.sequence_id] += 1
+                for recovery in recoveries
+            ]
+            evaluation_jobs.append((gene_id, locus.path, level, self.minimum_score, entries))
+
+        print(
+            f"QC stage: {len(evaluation_jobs)} loci using {self.workers} worker(s)", flush=True
+        )
+        evaluation_results = self._run_locus_jobs(_evaluate_locus, evaluation_jobs, "QC")
+        for gene_id, accepted, locus_qc_rows in evaluation_results:
+            qc_rows.extend(locus_qc_rows)
+            for sequence, sequence_id in accepted:
+                accepted_by_gene[gene_id].append((sequence, recovery_by_id[sequence_id]))
+                accepted_per_record[sequence_id] += 1
 
         final_recoveries = self._select_after_qc(level, recoveries, accepted_per_record)
         if not final_recoveries:
@@ -159,6 +231,7 @@ class BalancedKewPanelBuilder:
         reference_dir.mkdir()
         alignment_methods: set[str] = set()
         written_genes: list[str] = []
+        alignment_jobs = []
         for gene_id, locus in sorted(self.backbone.loci.items()):
             accepted = [
                 item
@@ -168,19 +241,31 @@ class BalancedKewPanelBuilder:
             groups = {getattr(recovery.taxonomy, level).casefold() for _, recovery in accepted}
             if len(accepted) < 2 or len(groups) < 2:
                 continue
-            aligned, method = add_many_to_alignment(
-                locus, [sequence for sequence, _ in accepted], self.prefer_mafft
+            alignment_jobs.append(
+                (
+                    gene_id,
+                    locus.path,
+                    [sequence for sequence, _ in accepted],
+                    self.prefer_mafft,
+                    reference_dir / f"{gene_id}.fasta",
+                )
             )
-            wanted_ids = {sequence.id for sequence, _ in accepted}
-            panel_records = [sequence for sequence in aligned if sequence.id in wanted_ids]
-            if len(panel_records) != len(accepted):
-                raise RuntimeError(f"Lost a Kew reference while aligning locus {gene_id}")
-            write_fasta(reference_dir / f"{gene_id}.fasta", panel_records)
+
+        print(
+            f"Alignment stage: {len(alignment_jobs)} loci using {self.workers} worker(s)",
+            flush=True,
+        )
+        alignment_results = self._run_locus_jobs(_align_locus, alignment_jobs, "alignment")
+        for gene_id, method, _ in alignment_results:
             alignment_methods.add(method)
             written_genes.append(gene_id)
 
         if not written_genes:
             raise RuntimeError("No locus retained at least two target groups after automatic QC")
+        written_genes.sort(
+            key=lambda value: (not value.isdigit(), int(value) if value.isdigit() else value)
+        )
+        qc_rows.sort(key=lambda row: (row["gene_id"], row["sequence_id"], row["candidate"]))
         (self.output_dir / "gene.list.txt").write_text(
             "".join(f"{gene}\n" for gene in written_genes), encoding="utf-8"
         )
@@ -210,6 +295,7 @@ class BalancedKewPanelBuilder:
             "selection_policy": "equal recovery count per target taxon; child-diversity first",
             "representatives_per_taxon": self.representatives_per_taxon,
             "minimum_recovered_loci": self.minimum_recovered_loci,
+            "workers": self.workers,
             "candidate_pool_recoveries": len(recoveries),
             "selected_recoveries": len(final_recoveries),
             "selected_groups": len(
@@ -232,6 +318,23 @@ class BalancedKewPanelBuilder:
         self._write_selection_tsv(selection)
         shutil.make_archive(str(self.output_dir) + "_bundle", "zip", self.output_dir)
         return report
+
+    def _run_locus_jobs(self, function, jobs: list[tuple], stage: str) -> list[tuple]:
+        """Run independent locus jobs, preserving a low-overhead serial path for one worker."""
+        if not jobs:
+            return []
+        results = []
+        if self.workers == 1:
+            for completed, job in enumerate(jobs, start=1):
+                results.append(function(job))
+                _progress(stage, completed, len(jobs))
+            return results
+        with ProcessPoolExecutor(max_workers=self.workers) as executor:
+            futures = [executor.submit(function, job) for job in jobs]
+            for completed, future in enumerate(as_completed(futures), start=1):
+                results.append(future.result())
+                _progress(stage, completed, len(futures))
+        return results
 
     def _records_in_parents(
         self,
