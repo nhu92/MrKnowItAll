@@ -65,3 +65,9 @@ printed after every ten completed loci.
 default is `sprout_test`, matching `zaratan_sprout_testrun.sbatch`; the refinement script verifies
 that token occurs in the resulting tree leaves before distance aggregation so a mismatch cannot
 silently produce an all-zero ranking.
+
+After family prediction, `ttu_kew_genus_refinement.sbatch` reads the selected families and builds
+a balanced Kew genus panel. It requests 32 CPUs and 64 GiB, uses all 32 CPUs for independent
+reference loci, and keeps the downstream SPrOUT tree pool at 4 × 4 threads to avoid nested
+oversubscription. The defaults expect the project-token repair results produced during the first
+TTU test; set `SPROUT_FAMILY_CANDIDATES` when using another family candidate file.
