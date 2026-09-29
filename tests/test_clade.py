@@ -73,6 +73,8 @@ def test_build_balanced_family_panel(tmp_path: Path) -> None:
     alignment = (output / "ref" / "4691.fasta").read_text(encoding="utf-8")
     assert report["selected_groups"] == 2
     assert report["loci"] == 1
+    assert report["selection"][0]["scientific_name"].startswith("Genus")
+    assert " " in report["selection"][0]["species"]
     assert alignment.count(">") == 2
     assert "Rosales_FamA_GenusA_speciesa_KEW_A1" in alignment
     assert "Rosales_FamB_GenusB_speciesb_KEW_B1" in alignment
