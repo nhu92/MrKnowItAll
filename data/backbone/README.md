@@ -15,7 +15,10 @@ sprout-ref install-backbone \
 
 Add `--overwrite` only when intentionally replacing an existing local installation.
 The installer extracts only recognized FASTA/CSV files, flattens paths safely, checks
-the 353-locus invariant and records the source SHA-256 in `backbone_install.json`.
+the 353-locus invariant and records the source SHA-256 in `backbone_install.json`. By default it
+also applies the versioned taxonomy corrections bundled with MrKnowItAll, excludes specimens
+flagged as phylogenetic mislabels, regenerates both summaries, and records correction hit counts.
+Use `--no-taxonomy-corrections` only to reproduce the uncorrected archive exactly.
 
 Validate the installed resource with:
 

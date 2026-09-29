@@ -40,6 +40,12 @@ sprout-ref build \
   --output runs/abatia-rugosa
 ```
 
+安装时默认应用 `corrections.xlsx` 转录出的 48 条 taxonomy/name replacements，并从全部 loci
+排除 9 个系统发育位置异常、疑似 mislabelled 的 specimen。异常记录不会按照其错误落点被强行
+改名。规则随软件版本保存在 `resources/taxonomy_corrections.tsv`；命中数、未命中规则和规则文件
+SHA-256 写入 `backbone_install.json`。可用 `--taxonomy-corrections custom.tsv` 替换规则，或用
+`--no-taxonomy-corrections` 明确安装原始 header。
+
 ### 分层 reference panel
 
 完整骨架安装后可按上一级 SPrOUT call 构建更窄的 reference：

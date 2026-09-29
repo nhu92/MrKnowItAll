@@ -14,7 +14,7 @@ from .clade import BalancedKewPanelBuilder
 from .kew import KewClient
 from .panel import HierarchicalPanelBuilder
 
-app = FastAPI(title="SPrOUT Reference Builder", version="0.2.0")
+app = FastAPI(title="SPrOUT Reference Builder", version="0.2.1")
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 

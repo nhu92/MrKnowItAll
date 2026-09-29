@@ -11,6 +11,7 @@ from pathlib import Path
 from statistics import median
 from zipfile import ZipFile
 
+from .corrections import apply_taxonomy_corrections, load_taxonomy_corrections
 from .fasta import FastaRecord, iter_fasta_files, read_fasta, ungap
 
 FASTA_SUFFIXES = {".fasta", ".fa", ".fas", ".fna"}
@@ -106,6 +107,8 @@ def install_backbone_archive(
     *,
     overwrite: bool = False,
     expected_loci: int = 353,
+    taxonomy_corrections: Path | None = None,
+    apply_builtin_corrections: bool = True,
 ) -> dict:
     """Install a curated alignment ZIP without preserving untrusted archive paths."""
     archive = archive.resolve()
@@ -134,14 +137,22 @@ def install_backbone_archive(
             with bundle.open(member) as source, output.open("wb") as target:
                 shutil.copyfileobj(source, target)
 
+    correction_report: dict | None = None
+    correction_sha256: str | None = None
+    if apply_builtin_corrections or taxonomy_corrections is not None:
+        corrections, correction_sha256 = load_taxonomy_corrections(taxonomy_corrections)
+        correction_report = apply_taxonomy_corrections(destination, corrections)
+
     metadata = Backbone(destination).metadata()
     metadata.pop("directory", None)
     metadata.pop("loci", None)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_archive": archive.name,
         "source_sha256": digest.hexdigest(),
         "summary_files": [Path(member).name for member in summary_members],
+        "taxonomy_corrections_sha256": correction_sha256,
+        "taxonomy_corrections": correction_report,
         **metadata,
     }
     (destination / "backbone_install.json").write_text(

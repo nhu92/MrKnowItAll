@@ -40,6 +40,16 @@ def parser() -> argparse.ArgumentParser:
     install.add_argument("--destination", required=True, type=Path)
     install.add_argument("--overwrite", action="store_true")
     install.add_argument("--expected-loci", type=int, default=353)
+    install.add_argument(
+        "--taxonomy-corrections",
+        type=Path,
+        help="Override TSV; defaults to the corrections bundled with MrKnowItAll",
+    )
+    install.add_argument(
+        "--no-taxonomy-corrections",
+        action="store_true",
+        help="Install original headers without bundled replacements or exclusions",
+    )
 
     build = commands.add_parser("build", help="Build a SPrOUT reference from Kew assemblies")
     _build_arguments(build)
@@ -138,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
             args.destination,
             overwrite=args.overwrite,
             expected_loci=args.expected_loci,
+            taxonomy_corrections=args.taxonomy_corrections,
+            apply_builtin_corrections=not args.no_taxonomy_corrections,
         )
         print(json.dumps(report, indent=2))
         return 0

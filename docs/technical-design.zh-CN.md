@@ -167,6 +167,17 @@ specimen/source entries、809 个唯一 binomials、61 orders、309 families。�
 对象发布；无论采用哪种方式，都应保留 checksum、来源、许可、物种清单、alignment 软件版本和
 校对版本。当前 `backbone_install.json` 已固定本次原始 ZIP 的 SHA-256。
 
+### 6.1 Taxonomy corrections 与 mislabel blacklist
+
+用户提供的 `corrections.xlsx` 已转换成版本化 TSV。`Corrections` 中 48 条记录作为精确 header
+prefix replacement，在保留 accession/gene suffix 和原始序列的情况下更新 order、family、genus
+或 species name。`Mislabled` 中 9 条记录的 suggested clade 表示序列在系统发育树上的异常落点，
+并不能证明样品真实身份，因此默认从所有 locus 中删除，而不是改成 suggested taxonomy。
+
+安装结束后重新生成 `gene_summary.csv` 与 `species_summary.csv`。manifest 记录 correction 文件
+SHA-256、替换/排除的 locus-sequence 次数以及未命中规则；任何未命中项都需要审计原始 header
+格式，但不会触发模糊匹配或静默修改。
+
 ## 7. 输出、可追溯性和失败语义
 
 - `ref/*.fasta`：完整骨架；通过 QC 的 gene 多一条目标物种序列。

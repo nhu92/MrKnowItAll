@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from .builder import ReferenceBuilder
+from .corrections import data_source_from_identifier
 from .fasta import FastaRecord, iter_fasta_files, read_fasta, write_fasta
 from .kew import KewClient
 from .models import Taxonomy
@@ -184,7 +185,7 @@ class HierarchicalPanelBuilder:
                     continue
                 species_key = f"{old_taxonomy.genus}_{old_taxonomy.species}".casefold()
                 tail = record.id.split("_", 4)[4] if len(record.id.split("_", 4)) == 5 else ""
-                source = tail.split("-", 1)[0].casefold()
+                source = data_source_from_identifier(record.id).casefold()
                 candidate = wanted.get((species_key, source))
                 if candidate is None:
                     continue
