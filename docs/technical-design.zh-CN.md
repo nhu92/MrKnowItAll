@@ -114,6 +114,24 @@ global pairwise alignment，再把候选碱基投影到模板的已有 alignment
 
 这一步能自动取代过去的“看树人工校对”，但必须输出不确定度，不能把统计阈值说成绝对正确。
 
+### 4.4 从 SPrOUT 结果自动逐级细化
+
+新增的 `build-kew-panel` 接受上一层的 `*_candidates.txt` 或 `*.predictions.csv`：family 层以
+order 为父节点，genus 层以 family 为父节点，species 层以 genus 为父节点。程序用 Kew species
+tree 将 manifest/recovery 映射到 taxonomy，再按目标类群做等量抽样：family 优先覆盖不同 genus，
+genus 优先覆盖不同 species，species 每个物种默认只选一个 recovery。候选池先按 recovery 的
+有效 Angiosperms353 locus 数排序；原始 recovery 或自动 QC 后低于 50 loci 的 specimen 默认
+剔除。候选池大小默认是最终代表数的两倍，因此低质量 specimen 会由同组候选自动补位。
+
+等量抽样是必要的：SPrOUT 当前 `04_prediction.py` 对同一 taxonomy 下所有 reference 的
+`total_value` 求和。如果直接下载某个 order 下全部 Kew 样品，物种更多的 family 会获得结构性
+优势。平衡 panel 降低这个偏差；后续仍建议在 SPrOUT 中加入按 reference/locus 数归一化的
+top-k 或 trimmed-mean score，并用已知混合物标定阈值。
+
+通过 QC 的 KEW sequences 以一次 MAFFT `--addfragments --keeplength`/locus 批量投影到完整骨架，
+随后只输出本层选中的 KEW records。因此 100 个 specimens × 353 loci 不会启动 35,300 次 MAFFT。
+若没有 MAFFT，Biopython fallback 会缓存骨架 k-mer 并逐条投影，主要用于测试而非大规模生产。
+
 ## 5. 机器学习如何使用
 
 机器学习适合做异常检测和阈值校准，不适合生成 reference 碱基。

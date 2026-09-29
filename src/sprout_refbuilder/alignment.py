@@ -8,7 +8,7 @@ from pathlib import Path
 from Bio import Align
 
 from .backbone import LocusBackbone
-from .fasta import FastaRecord, read_fasta, ungap, write_fasta
+from .fasta import FastaRecord, parse_fasta_text, read_fasta, ungap, write_fasta
 
 
 def add_to_alignment(
@@ -20,6 +20,25 @@ def add_to_alignment(
         return _mafft_add(locus, candidate), "mafft-addfragments-keeplength"
     projected = _project_pairwise(locus, candidate)
     return [*locus.records, projected], "biopython-pairwise-projection"
+
+
+def add_many_to_alignment(
+    locus: LocusBackbone,
+    candidates: list[FastaRecord],
+    prefer_mafft: bool = True,
+) -> tuple[list[FastaRecord], str]:
+    """Project several references into one curated locus alignment in one operation.
+
+    Batch addition is important for clade panels: invoking MAFFT once per species would make a
+    family panel need tens of thousands of processes.  The curated alignment is used only as a
+    coordinate scaffold; callers may retain or discard its original records afterwards.
+    """
+    if not candidates:
+        return list(locus.records), "none"
+    if prefer_mafft and shutil.which("mafft"):
+        return _mafft_add_many(locus, candidates), "mafft-addfragments-keeplength"
+    projected = _project_many_pairwise(locus, candidates)
+    return [*locus.records, *projected], "biopython-pairwise-projection"
 
 
 def _mafft_add(locus: LocusBackbone, candidate: FastaRecord) -> list[FastaRecord]:
@@ -47,9 +66,59 @@ def _mafft_add(locus: LocusBackbone, candidate: FastaRecord) -> list[FastaRecord
     return records
 
 
+def _mafft_add_many(locus: LocusBackbone, candidates: list[FastaRecord]) -> list[FastaRecord]:
+    with tempfile.TemporaryDirectory(prefix="sprout-ref-batch-") as temporary:
+        directory = Path(temporary)
+        backbone_file = directory / "backbone.fasta"
+        candidate_file = directory / "candidates.fasta"
+        write_fasta(backbone_file, locus.records)
+        write_fasta(candidate_file, candidates)
+        command = [
+            "mafft",
+            "--quiet",
+            "--preservecase",
+            "--addfragments",
+            str(candidate_file),
+            "--keeplength",
+            str(backbone_file),
+        ]
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        records = parse_fasta_text(result.stdout)
+    if len(records) != len(locus.records) + len(candidates):
+        raise RuntimeError(
+            f"MAFFT added {len(records) - len(locus.records)} sequences instead of "
+            f"{len(candidates)} for locus {locus.gene_id}"
+        )
+    return records
+
+
 def _project_pairwise(locus: LocusBackbone, candidate: FastaRecord) -> FastaRecord:
     candidate_sequence = ungap(candidate.sequence)
     template = max(locus.records, key=lambda record: _quick_similarity(candidate_sequence, record.sequence))
+    return _project_to_template(locus, candidate, template)
+
+
+def _project_many_pairwise(
+    locus: LocusBackbone, candidates: list[FastaRecord]
+) -> list[FastaRecord]:
+    """Pairwise fallback with cached reference k-mers for batch-panel construction."""
+    k = 7
+    reference_kmers = [(_kmer_set(record.sequence, k), record) for record in locus.records]
+    projected: list[FastaRecord] = []
+    for candidate in candidates:
+        query = _kmer_set(candidate.sequence, k)
+        template = max(
+            reference_kmers,
+            key=lambda item: _set_similarity(query, item[0]),
+        )[1]
+        projected.append(_project_to_template(locus, candidate, template))
+    return projected
+
+
+def _project_to_template(
+    locus: LocusBackbone, candidate: FastaRecord, template: FastaRecord
+) -> FastaRecord:
+    candidate_sequence = ungap(candidate.sequence)
     template_sequence = ungap(template.sequence)
     aligner = Align.PairwiseAligner()
     aligner.mode = "global"
@@ -73,10 +142,16 @@ def _project_pairwise(locus: LocusBackbone, candidate: FastaRecord) -> FastaReco
 
 
 def _quick_similarity(query: str, aligned_reference: str) -> float:
-    reference = ungap(aligned_reference)
     k = 7
-    left = {query[i : i + k] for i in range(max(0, len(query) - k + 1))}
-    right = {reference[i : i + k] for i in range(max(0, len(reference) - k + 1))}
-    union = left | right
-    return len(left & right) / len(union) if union else 0.0
+    return _set_similarity(_kmer_set(query, k), _kmer_set(aligned_reference, k))
 
+
+def _kmer_set(sequence: str, k: int) -> set[str]:
+    clean = ungap(sequence)
+    return {clean[i : i + k] for i in range(max(0, len(clean) - k + 1))}
+
+
+def _set_similarity(left: set[str], right: set[str]) -> float:
+    intersection = len(left & right)
+    union_size = len(left) + len(right) - intersection
+    return intersection / union_size if union_size else 0.0

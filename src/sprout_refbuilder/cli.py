@@ -8,6 +8,7 @@ from pathlib import Path
 from .assembly import assemble_with_hybpiper
 from .backbone import Backbone, install_backbone_archive
 from .builder import ReferenceBuilder
+from .clade import BalancedKewPanelBuilder, read_taxon_candidates
 from .kew import DEFAULT_BASE_URL, KewClient
 from .ml import train_anomaly_model
 from .models import Taxonomy
@@ -70,6 +71,30 @@ def parser() -> argparse.ArgumentParser:
     )
     panel.add_argument("--representatives", type=int, default=2)
     panel.add_argument("--python-aligner", action="store_true")
+
+    kew_panel = commands.add_parser(
+        "build-kew-panel",
+        help="Build a balanced family/genus/species panel from Kew assembled recoveries",
+    )
+    kew_panel.add_argument("--level", required=True, choices=["family", "genus", "species"])
+    kew_panel.add_argument("--parent-taxon", action="append", default=[])
+    kew_panel.add_argument(
+        "--parent-file", type=Path, help="SPrOUT candidate TXT or ranked prediction CSV"
+    )
+    kew_panel.add_argument(
+        "--minimum-z", type=float, help="Optional z-score filter when --parent-file is CSV"
+    )
+    kew_panel.add_argument(
+        "--top", type=int, default=0, help="Use only the top N parents from --parent-file"
+    )
+    kew_panel.add_argument("--backbone", required=True, type=Path)
+    kew_panel.add_argument("--output", required=True, type=Path)
+    kew_panel.add_argument("--representatives", type=int, default=4)
+    kew_panel.add_argument("--pool-multiplier", type=int, default=2)
+    kew_panel.add_argument("--minimum-recovered-loci", type=int, default=50)
+    kew_panel.add_argument("--minimum-score", type=float, default=0.50)
+    kew_panel.add_argument("--download-workers", type=int, default=4)
+    kew_panel.add_argument("--python-aligner", action="store_true")
 
     demo = commands.add_parser("demo-mix7", help="Build the controlled mix7 hierarchy demo")
     demo.add_argument("--backbone", required=True, type=Path)
@@ -145,6 +170,25 @@ def main(argv: list[str] | None = None) -> int:
                 parent_taxa=args.parent_taxon,
                 include_species=args.include_species,
             )
+            print(json.dumps(report, indent=2))
+            return 0
+        if args.command == "build-kew-panel":
+            parents = list(args.parent_taxon)
+            if args.parent_file:
+                parents.extend(
+                    read_taxon_candidates(args.parent_file, args.minimum_z, args.top)
+                )
+            parents = list(dict.fromkeys(parents))
+            report = BalancedKewPanelBuilder(
+                args.backbone,
+                args.output,
+                representatives_per_taxon=args.representatives,
+                pool_multiplier=args.pool_multiplier,
+                minimum_recovered_loci=args.minimum_recovered_loci,
+                minimum_score=args.minimum_score,
+                prefer_mafft=not args.python_aligner,
+                download_workers=args.download_workers,
+            ).build(args.level, parents, client)
             print(json.dumps(report, indent=2))
             return 0
         if args.command == "demo-mix7":

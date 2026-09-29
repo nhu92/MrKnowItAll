@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from functools import lru_cache
 
 from .backbone import LocusBackbone
 from .fasta import FastaRecord, ungap
@@ -12,16 +13,17 @@ STOP_CODONS = {"TAA", "TAG", "TGA"}
 COMPLEMENT = str.maketrans("ACGTRYMKSWBDHVN", "TGCAYRKMSWVHDBN")
 
 
-def kmers(sequence: str, k: int = 9) -> set[str]:
+@lru_cache(maxsize=4096)
+def kmers(sequence: str, k: int = 9) -> frozenset[str]:
     clean = ungap(sequence).upper()
-    return {
+    return frozenset(
         clean[index : index + k]
         for index in range(max(0, len(clean) - k + 1))
         if set(clean[index : index + k]) <= {"A", "C", "G", "T"}
-    }
+    )
 
 
-def jaccard(left: set[str], right: set[str]) -> float:
+def jaccard(left: frozenset[str], right: frozenset[str]) -> float:
     union = left | right
     return len(left & right) / len(union) if union else 0.0
 

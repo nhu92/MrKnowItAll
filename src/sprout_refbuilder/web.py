@@ -10,10 +10,11 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from .builder import ReferenceBuilder
+from .clade import BalancedKewPanelBuilder
 from .kew import KewClient
 from .panel import HierarchicalPanelBuilder
 
-app = FastAPI(title="SPrOUT Reference Builder", version="0.1.0")
+app = FastAPI(title="SPrOUT Reference Builder", version="0.2.0")
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 
@@ -29,6 +30,13 @@ class PanelRequest(BaseModel):
     parent_taxa: list[str] = Field(default_factory=list)
     include_species: list[str] = Field(default_factory=list)
     representatives: int = Field(default=2, ge=1, le=20)
+
+
+class KewPanelRequest(BaseModel):
+    level: str = Field(pattern="^(family|genus|species)$")
+    parent_taxa: list[str] = Field(min_length=1)
+    representatives: int = Field(default=4, ge=1, le=20)
+    minimum_recovered_loci: int = Field(default=50, ge=1, le=353)
 
 
 def settings() -> tuple[Path, Path, Path, Path | None]:
@@ -101,6 +109,23 @@ def start_panel(request: PanelRequest, tasks: BackgroundTasks) -> dict:
     return _jobs[job_id]
 
 
+@app.post("/api/kew-panel", status_code=202)
+def start_kew_panel(request: KewPanelRequest, tasks: BackgroundTasks) -> dict:
+    _, backbone, _, _ = settings()
+    if not backbone.is_dir() or not any(backbone.glob("*.fasta")):
+        raise HTTPException(503, "Backbone is not configured")
+    job_id = uuid.uuid4().hex
+    with _lock:
+        _jobs[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "type": "balanced-kew-panel",
+            "level": request.level,
+        }
+    tasks.add_task(_run_kew_panel, job_id, request)
+    return _jobs[job_id]
+
+
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
     if job_id not in _jobs:
@@ -165,6 +190,27 @@ def _run_panel(job_id: str, request: PanelRequest, summary: Path) -> None:
             _jobs[job_id].update(status="failed", error=str(exc))
 
 
+def _run_kew_panel(job_id: str, request: KewPanelRequest) -> None:
+    cache, backbone, work, _ = settings()
+    output = work / job_id
+    with _lock:
+        _jobs[job_id]["status"] = "running"
+    try:
+        with KewClient(cache) as client:
+            report = BalancedKewPanelBuilder(
+                backbone,
+                output,
+                representatives_per_taxon=request.representatives,
+                minimum_recovered_loci=request.minimum_recovered_loci,
+            ).build(request.level, request.parent_taxa, client)
+        bundle = Path(str(output) + "_bundle.zip")
+        with _lock:
+            _jobs[job_id].update(status="complete", report=report, bundle=str(bundle))
+    except Exception as exc:  # noqa: BLE001 - surfaced to the local user through job state
+        with _lock:
+            _jobs[job_id].update(status="failed", error=str(exc))
+
+
 def main() -> None:
     import uvicorn
 
@@ -184,9 +230,11 @@ label{display:block;margin:12px 0 8px;color:var(--muted)}.row{display:flex;gap:1
 <h1>构建可信 reference</h1><p>从 Kew 精确物种 recovery 或 order → family → genus 分层骨架生成 SPrOUT <code>-r</code> 可用的 alignment bundle；全程保留自动 QC 与 provenance。</p>
 <section class="panel"><form id="form"><label for="taxon">目标物种</label><div class="row"><input id="taxon" placeholder="例如 Abatia rugosa" required><button>构建</button></div></form><p class="fine">系统不会用近缘种 consensus 冒充未测序物种。无精确数据时会停止并返回候选名称。</p><pre id="status">等待输入。</pre><a class="button" id="download" hidden>下载 reference bundle</a></section>
 <section class="panel"><form id="panel-form"><div class="grid"><div><label for="level">层级</label><select id="level"><option>order</option><option>family</option><option>genus</option></select></div><div><label for="parents">上一级 calls（逗号分隔）</label><input id="parents" placeholder="Asparagales, Brassicales, Rosales"></div></div><label for="species">可选：整合 Kew 精确物种（二名法，逗号分隔）</label><div class="row"><input id="species" placeholder="Allium sativum, Brassica oleracea"><button>构建 panel</button></div></form><p class="fine">order 可留空；family 输入 orders；genus 输入 families。每个 taxon 默认自动选择两个高覆盖且尽量分散的骨架代表。</p></section>
+<section class="panel"><form id="kew-panel-form"><div class="grid"><div><label for="kew-level">KEW 细化层级</label><select id="kew-level"><option>family</option><option>genus</option><option>species</option></select></div><div><label for="kew-parents">SPrOUT 上一级候选（逗号分隔）</label><input id="kew-parents" placeholder="Rosales" required></div></div><label for="kew-representatives">每个目标 taxon 的平衡代表数</label><div class="row"><input id="kew-representatives" type="number" min="1" max="20" value="4"><button>从 KEW 构建细化 panel</button></div></form><p class="fine">family 输入 orders；genus 输入 families；species 输入 genera。每组保持相同的 reference 数，避免累计得分受 KEW 采样量影响。</p></section>
 <script>
 const form=document.querySelector('#form'), status=document.querySelector('#status'), dl=document.querySelector('#download');
 form.addEventListener('submit',async e=>{e.preventDefault();dl.hidden=true;status.textContent='提交任务…';const r=await fetch('/api/build',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({taxon:document.querySelector('#taxon').value})});const j=await r.json();if(!r.ok){status.textContent=j.detail||JSON.stringify(j);return}poll(j.id)});
 document.querySelector('#panel-form').addEventListener('submit',async e=>{e.preventDefault();dl.hidden=true;status.textContent='提交 panel 任务…';const split=id=>document.querySelector(id).value.split(',').map(x=>x.trim()).filter(Boolean);const body={level:document.querySelector('#level').value,parent_taxa:split('#parents'),include_species:split('#species')};const r=await fetch('/api/panel',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok){status.textContent=j.detail||JSON.stringify(j);return}poll(j.id)});
+document.querySelector('#kew-panel-form').addEventListener('submit',async e=>{e.preventDefault();dl.hidden=true;status.textContent='正在从 KEW 构建平衡细化 panel…';const parents=document.querySelector('#kew-parents').value.split(',').map(x=>x.trim()).filter(Boolean);const body={level:document.querySelector('#kew-level').value,parent_taxa:parents,representatives:Number(document.querySelector('#kew-representatives').value)};const r=await fetch('/api/kew-panel',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok){status.textContent=j.detail||JSON.stringify(j);return}poll(j.id)});
 async function poll(id){const r=await fetch('/api/jobs/'+id),j=await r.json();status.textContent=JSON.stringify(j,null,2);if(j.status==='queued'||j.status==='running')setTimeout(()=>poll(id),1500);if(j.status==='complete'){dl.href='/api/jobs/'+id+'/download';dl.hidden=false}}
 </script></main></body></html>"""

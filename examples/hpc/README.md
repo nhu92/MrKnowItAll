@@ -23,3 +23,34 @@ by the original example.
 
 Optional submission-time overrides include `SPROUT_SAMPLE_FRACTION`, `SPROUT_SAMPLE_SEED`,
 `SPROUT_SOURCE`, `SPROUT_CONDA_ENV`, and `SPROUT_TREE_WORKERS`.
+
+## TTU Nocona: Kew family refinement
+
+`ttu_kew_family_refinement.sbatch` reuses the completed smoke test's extracted exons and order
+call, generates a count-balanced Kew family panel with MrKnowItAll, then reruns SPrOUT tree,
+distance, and family prediction stages. It never modifies the original smoke-test directory.
+
+The full curated backbone is intentionally not stored in Git. Before submission, install the
+provided alignment ZIP in the TTU checkout so that `data/backbone` contains 353 FASTA files:
+
+```bash
+git clone https://github.com/nhu92/MrKnowItAll.git \
+  /lustre/scratch/nhu/202606/SPrOUT/MrKnowItAll
+cd /lustre/scratch/nhu/202606/SPrOUT/MrKnowItAll
+conda activate sprout
+pip install -e .
+sprout-ref install-backbone \
+  --archive /path/on/ttu/angiosperms_353_v2_interim_targetfile_gene_alignments.zip \
+  --destination data/backbone --overwrite
+```
+
+Then submit from a fresh run directory:
+
+```bash
+run=/lustre/scratch/nhu/202606/SPrOUT/kew_family_refinement_20260929
+mkdir -p "$run/logs"
+cp /lustre/scratch/nhu/202606/SPrOUT/MrKnowItAll/examples/hpc/ttu_kew_family_refinement.sbatch "$run/"
+cd "$run"
+bash -n ttu_kew_family_refinement.sbatch
+sbatch ttu_kew_family_refinement.sbatch
+```
