@@ -76,3 +76,13 @@ TTU test; set `SPROUT_FAMILY_CANDIDATES` when using another family candidate fil
 by the full `Genus_species` binomial (never by epithet alone), one QC-passing Kew recovery is
 selected per species, and SPrOUT emits both the complete species ranking and the positive-z-score
 candidate list.
+
+## One-job mixed-read identification to genus
+
+`ttu_mix_to_genus.sbatch` accepts arbitrary paired FASTQ/FASTQ.GZ paths through `SPROUT_READ1`
+and `SPROUT_READ2`, assembles the configured target loci, and runs order → Kew family → Kew genus
+in one isolated Slurm job. Intermediate gates combine SPrOUT aggregate z-scores with per-query
+nearest-reference votes and require support from at least two independent locus trees. This keeps
+lower-abundance mixture members that a global z-score alone can suppress. The final deliverables
+are `FINAL_GENUS_CANDIDATES.txt`, `FINAL_GENUS_RANKING.csv`, and
+`FINAL_GENUS_EVIDENCE.csv`.

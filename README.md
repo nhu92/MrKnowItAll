@@ -101,6 +101,21 @@ recovery 的物种不会被近缘 consensus 冒名代替。`selection.tsv`、`qc
 QC 和 alignment 均按 locus 多进程并行；HPC 上将 `--threads` 设为 Slurm 分配的 CPU 数。每个
 MAFFT 子进程固定使用 1 核，避免“进程数 × MAFFT 线程数”的嵌套超配。
 
+### 任意混合 reads 一键鉴定到 genus
+
+TTU/Nocona 上可使用 `examples/hpc/ttu_mix_to_genus.sbatch`。它接收任意 paired
+FASTQ/FASTQ.GZ，依次运行 assembly、order、Kew family 和 Kew genus，并输出：
+
+```text
+FINAL_GENUS_CANDIDATES.txt
+FINAL_GENUS_RANKING.csv
+FINAL_GENUS_EVIDENCE.csv
+```
+
+层级候选不再只由全局 z-score 决定。程序同时读取每个 exon tree 的距离矩阵，对每条 query
+exon 投最近 reference 票，并要求至少两个独立 locus 支持；候选是 locus-vote、z-score 和总体
+第一名的并集。这能保留混合样品中被强组分压低全局 z-score 的低丰度类群。
+
 UMD Zaratan 上对原始 SPrOUT 50-gene 示例做隔离 smoke test 的 Slurm 脚本见
 [examples/hpc](examples/hpc/README.md)。它使用独立输出目录，并限制嵌套 MAFFT 并发以避免超配。
 

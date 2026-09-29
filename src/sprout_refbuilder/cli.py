@@ -9,6 +9,7 @@ from .assembly import assemble_with_hybpiper
 from .backbone import Backbone, install_backbone_archive
 from .builder import ReferenceBuilder
 from .clade import BalancedKewPanelBuilder, read_taxon_candidates
+from .candidates import select_mixture_candidates
 from .kew import DEFAULT_BASE_URL, KewClient
 from .ml import train_anomaly_model
 from .models import Taxonomy
@@ -112,6 +113,21 @@ def parser() -> argparse.ArgumentParser:
     )
     kew_panel.add_argument("--python-aligner", action="store_true")
 
+    candidates = commands.add_parser(
+        "select-candidates",
+        help="Combine aggregate scores with per-query nearest-reference locus votes",
+    )
+    candidates.add_argument("--matrix-dir", required=True, type=Path)
+    candidates.add_argument("--predictions", required=True, type=Path)
+    candidates.add_argument("--level", required=True, choices=["order", "family", "genus"])
+    candidates.add_argument("--project", required=True)
+    candidates.add_argument("--output", required=True, type=Path)
+    candidates.add_argument("--report", required=True, type=Path)
+    candidates.add_argument("--minimum-locus-votes", type=int, default=2)
+    candidates.add_argument("--minimum-z", type=float, default=0.0)
+    candidates.add_argument("--always-top", type=int, default=1)
+    candidates.add_argument("--max-candidates", type=int, default=12)
+
     demo = commands.add_parser("demo-mix7", help="Build the controlled mix7 hierarchy demo")
     demo.add_argument("--backbone", required=True, type=Path)
     demo.add_argument("--summary", required=True, type=Path)
@@ -161,6 +177,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "train-qc":
         print(json.dumps(train_anomaly_model(args.backbone, args.output), indent=2))
+        return 0
+    if args.command == "select-candidates":
+        report = select_mixture_candidates(
+            args.matrix_dir,
+            args.predictions,
+            args.output,
+            args.report,
+            level=args.level,
+            project=args.project,
+            minimum_locus_votes=args.minimum_locus_votes,
+            minimum_z=args.minimum_z,
+            always_top=args.always_top,
+            max_candidates=args.max_candidates,
+        )
+        print(json.dumps(report, indent=2))
         return 0
     if args.command == "web":
         import uvicorn
