@@ -60,3 +60,8 @@ The Kew reference builder runs the 353 independent locus-QC and MAFFT jobs with 
 allocated CPU (`--threads 16` by default on this script). Each MAFFT process uses one thread, so
 the job stays within its Slurm allocation. Override with `SPROUT_REF_BUILD_WORKERS`; progress is
 printed after every ten completed loci.
+
+`SPROUT_PROJECT` must equal the project token embedded in the reused query exon headers. The
+default is `sprout_test`, matching `zaratan_sprout_testrun.sbatch`; the refinement script verifies
+that token occurs in the resulting tree leaves before distance aggregation so a mismatch cannot
+silently produce an all-zero ranking.

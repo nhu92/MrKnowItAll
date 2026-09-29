@@ -18,7 +18,9 @@ MRKNOWITALL_SOURCE=${MRKNOWITALL_SOURCE:-/lustre/scratch/nhu/202609/871ref/MrKno
 MRKNOWITALL_BACKBONE=${MRKNOWITALL_BACKBONE:-/lustre/scratch/nhu/202609/871ref/backbone_corrected}
 CONDA_SH=${SPROUT_CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}
 CONDA_ENV=${SPROUT_CONDA_ENV:-sprout}
-PROJECT=${SPROUT_PROJECT:-sprout_test_kew_family}
+# This must match the project token already embedded in the reused exon FASTA headers.
+# The smoke-test exons were assembled with -p sprout_test.
+PROJECT=${SPROUT_PROJECT:-sprout_test}
 THREADS=${SPROUT_TREE_WORKERS:-4}
 BUILD_WORKERS=${SPROUT_REF_BUILD_WORKERS:-${SLURM_CPUS_PER_TASK:-16}}
 RUN=${SPROUT_REFINEMENT_RUN:-$PWD}
@@ -83,6 +85,10 @@ python "$SPROUT_SOURCE/02_exon_trees.py" \
   -e "$SPROUT_TEST_RUN/exon" \
   -r family_reference/ref \
   --output_phylo family_phylo
+if ! grep -R -F -q --include='*.tre' "$PROJECT" family_phylo; then
+  echo "No query leaf contains project token '$PROJECT'; refusing to emit all-zero scores" >&2
+  exit 5
+fi
 python "$SPROUT_SOURCE/03_distance_matrices.py" \
   -t "$THREADS" -p "$PROJECT" -g gene_list.txt --threshold 1 \
   --input_phylo family_phylo --output_tree family_matrix
