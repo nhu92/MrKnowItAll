@@ -62,10 +62,12 @@ mkdir -p 00_query 01_order 02_family 03_genus
 
 source "$CONDA_SH"
 conda activate "$CONDA_ENV"
-python -m pip install -e "$MRKNOWITALL_SOURCE"
+python -m pip install -e "${MRKNOWITALL_SOURCE}[dev]"
 for tool in python fastp hybpiper mafft fasttree trimal seqkit bwa sprout-ref; do
   command -v "$tool" || { echo "Missing required tool: $tool" >&2; exit 127; }
 done
+python -m pytest -q "$MRKNOWITALL_SOURCE/tests"
+ruff check "$MRKNOWITALL_SOURCE/src" "$MRKNOWITALL_SOURCE/tests"
 
 {
   echo "started=$(date -Is)"
