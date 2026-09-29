@@ -14,8 +14,8 @@ trap 'code=$?; echo "FAILED exit=${code} line=${LINENO} $(date -Is)"; exit "$cod
 
 SPROUT_SOURCE=${SPROUT_SOURCE:-/lustre/scratch/nhu/202606/SPrOUT}
 SPROUT_TEST_RUN=${SPROUT_TEST_RUN:-$SPROUT_SOURCE/testrun_20260929}
-MRKNOWITALL_SOURCE=${MRKNOWITALL_SOURCE:-$SPROUT_SOURCE/MrKnowItAll}
-MRKNOWITALL_BACKBONE=${MRKNOWITALL_BACKBONE:-$MRKNOWITALL_SOURCE/data/backbone}
+MRKNOWITALL_SOURCE=${MRKNOWITALL_SOURCE:-/lustre/scratch/nhu/202609/871ref/MrKnowItAll}
+MRKNOWITALL_BACKBONE=${MRKNOWITALL_BACKBONE:-/lustre/scratch/nhu/202609/871ref/backbone_corrected}
 CONDA_SH=${SPROUT_CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}
 CONDA_ENV=${SPROUT_CONDA_ENV:-sprout}
 PROJECT=${SPROUT_PROJECT:-sprout_test_kew_family}

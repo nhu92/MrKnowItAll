@@ -30,26 +30,27 @@ Optional submission-time overrides include `SPROUT_SAMPLE_FRACTION`, `SPROUT_SAM
 call, generates a count-balanced Kew family panel with MrKnowItAll, then reruns SPrOUT tree,
 distance, and family prediction stages. It never modifies the original smoke-test directory.
 
-The full curated backbone is intentionally not stored in Git. Before submission, install the
-provided alignment ZIP in the TTU checkout so that `data/backbone` contains 353 FASTA files:
+The full curated backbone is intentionally not stored in Git. The uploaded archive is expected
+under `/lustre/scratch/nhu/202609/871ref`. First clone/update the repository, then submit the
+preparation job. It runs the unit/lint tests on TTU, installs all 353 alignments, applies the
+versioned taxonomy corrections and mislabel blacklist, and audits the correction hit counts:
 
 ```bash
 git clone https://github.com/nhu92/MrKnowItAll.git \
-  /lustre/scratch/nhu/202606/SPrOUT/MrKnowItAll
-cd /lustre/scratch/nhu/202606/SPrOUT/MrKnowItAll
-conda activate sprout
-pip install -e .
-sprout-ref install-backbone \
-  --archive /path/on/ttu/angiosperms_353_v2_interim_targetfile_gene_alignments.zip \
-  --destination data/backbone --overwrite
+  /lustre/scratch/nhu/202609/871ref/MrKnowItAll
+run=/lustre/scratch/nhu/202609/871ref/prepare_backbone_run
+mkdir -p "$run/logs"
+cp /lustre/scratch/nhu/202609/871ref/MrKnowItAll/examples/hpc/ttu_prepare_backbone.sbatch "$run/"
+cd "$run"
+sbatch ttu_prepare_backbone.sbatch
 ```
 
-Then submit from a fresh run directory:
+After that job succeeds, submit family refinement from a fresh run directory:
 
 ```bash
 run=/lustre/scratch/nhu/202606/SPrOUT/kew_family_refinement_20260929
 mkdir -p "$run/logs"
-cp /lustre/scratch/nhu/202606/SPrOUT/MrKnowItAll/examples/hpc/ttu_kew_family_refinement.sbatch "$run/"
+cp /lustre/scratch/nhu/202609/871ref/MrKnowItAll/examples/hpc/ttu_kew_family_refinement.sbatch "$run/"
 cd "$run"
 bash -n ttu_kew_family_refinement.sbatch
 sbatch ttu_kew_family_refinement.sbatch
