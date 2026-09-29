@@ -160,7 +160,7 @@ def _summary_key(identifier: str) -> tuple[str, str, str, str] | None:
     fields = identifier.split("_", 4)
     if len(fields) != 5:
         return None
-    order, family, genus, species, tail = fields
+    order, family, genus, species, _tail = fields
     source = data_source_from_identifier(identifier)
     return f"{genus}_{species}", order, family, source
 
