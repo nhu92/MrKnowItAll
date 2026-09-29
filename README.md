@@ -62,6 +62,9 @@ sprout-ref demo-mix7 --backbone data/backbone \
   --summary data/backbone/species_summary.csv --output runs/mix7-demo
 ```
 
+UMD Zaratan 上对原始 SPrOUT 50-gene 示例做隔离 smoke test 的 Slurm 脚本见
+[examples/hpc](examples/hpc/README.md)。它使用独立输出目录，并限制嵌套 MAFFT 并发以避免超配。
+
 可选的自动异常模型：`sprout-ref train-qc --backbone data/backbone --output data/qc.joblib`，
 然后在 `build` 增加 `--ml-model data/qc.joblib`，或为 Web 设置 `SPROUT_REF_ML_MODEL`。默认只将
 anomaly score `< -0.05` 的强异常作为额外 rejection，可用 `--ml-min-score` 在独立验证后调整。
