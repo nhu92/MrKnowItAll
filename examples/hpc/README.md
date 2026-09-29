@@ -57,7 +57,7 @@ sbatch ttu_kew_family_refinement.sbatch
 ```
 
 The Kew reference builder runs the 353 independent locus-QC and MAFFT jobs with one process per
-allocated CPU (`--threads 16` by default on this script). Each MAFFT process uses one thread, so
+allocated CPU (`--threads 32` by default on this script). Each MAFFT process uses one thread, so
 the job stays within its Slurm allocation. Override with `SPROUT_REF_BUILD_WORKERS`; progress is
 printed after every ten completed loci.
 
@@ -71,3 +71,8 @@ a balanced Kew genus panel. It requests 32 CPUs and 64 GiB, uses all 32 CPUs for
 reference loci, and keeps the downstream SPrOUT tree pool at 4 × 4 threads to avoid nested
 oversubscription. The defaults expect the project-token repair results produced during the first
 TTU test; set `SPROUT_FAMILY_CANDIDATES` when using another family candidate file.
+
+`ttu_kew_species_refinement.sbatch` performs the final genus-to-species step. Species are grouped
+by the full `Genus_species` binomial (never by epithet alone), one QC-passing Kew recovery is
+selected per species, and SPrOUT emits both the complete species ranking and the positive-z-score
+candidate list.

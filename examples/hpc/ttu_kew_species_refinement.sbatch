@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=kew_family
+#SBATCH --job-name=kew_species
 #SBATCH --partition=nocona
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -14,20 +14,20 @@ trap 'code=$?; echo "FAILED exit=${code} line=${LINENO} $(date -Is)"; exit "$cod
 
 SPROUT_SOURCE=${SPROUT_SOURCE:-/lustre/scratch/nhu/202606/SPrOUT}
 SPROUT_TEST_RUN=${SPROUT_TEST_RUN:-$SPROUT_SOURCE/testrun_20260929}
+GENUS_RUN=${SPROUT_GENUS_RUN:-$SPROUT_SOURCE/kew_genus_refinement_20260929}
+GENUS_CANDIDATES=${SPROUT_GENUS_CANDIDATES:-$GENUS_RUN/sprout_test.genus_candidates.txt}
 MRKNOWITALL_SOURCE=${MRKNOWITALL_SOURCE:-/lustre/scratch/nhu/202609/871ref/MrKnowItAll}
 MRKNOWITALL_BACKBONE=${MRKNOWITALL_BACKBONE:-/lustre/scratch/nhu/202609/871ref/backbone_corrected}
 CONDA_SH=${SPROUT_CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}
 CONDA_ENV=${SPROUT_CONDA_ENV:-sprout}
-# This must match the project token already embedded in the reused exon FASTA headers.
-# The smoke-test exons were assembled with -p sprout_test.
 PROJECT=${SPROUT_PROJECT:-sprout_test}
-THREADS=${SPROUT_TREE_WORKERS:-4}
+TREE_WORKERS=${SPROUT_TREE_WORKERS:-4}
 BUILD_WORKERS=${SPROUT_REF_BUILD_WORKERS:-${SLURM_CPUS_PER_TASK:-32}}
 RUN=${SPROUT_REFINEMENT_RUN:-$PWD}
 
 cd "$RUN"
-if [[ -e SUCCESS || -e family_reference || -e family_phylo || -e family_matrix ]]; then
-  echo "Refusing to reuse a refinement directory containing outputs: $RUN" >&2
+if [[ -e SUCCESS || -e species_reference || -e species_phylo || -e species_matrix ]]; then
+  echo "Refusing to reuse a species directory containing outputs: $RUN" >&2
   exit 4
 fi
 for path in \
@@ -36,78 +36,79 @@ for path in \
   "$SPROUT_SOURCE/04_prediction.py" \
   "$SPROUT_TEST_RUN/exon" \
   "$SPROUT_TEST_RUN/gene_list.txt" \
-  "$SPROUT_TEST_RUN/sprout_test.order_candidates.txt" \
+  "$GENUS_CANDIDATES" \
   "$MRKNOWITALL_SOURCE/pyproject.toml"; do
   [[ -e "$path" ]] || { echo "Missing required input: $path" >&2; exit 2; }
 done
 backbone_count=$(find "$MRKNOWITALL_BACKBONE" -maxdepth 1 -type f -name '*.fasta' | wc -l)
 [[ "$backbone_count" -eq 353 ]] || {
-  echo "Expected 353 installed backbone alignments at $MRKNOWITALL_BACKBONE; found $backbone_count" >&2
+  echo "Expected 353 backbone alignments; found $backbone_count" >&2
   exit 2
 }
 
 source "$CONDA_SH"
 conda activate "$CONDA_ENV"
-python -m pip install -e "${MRKNOWITALL_SOURCE}[dev]"
+python -m pip install -e "$MRKNOWITALL_SOURCE"
 for tool in python mafft fasttree trimal; do
   command -v "$tool" || { echo "Missing required tool: $tool" >&2; exit 127; }
 done
-python -m pytest -q "$MRKNOWITALL_SOURCE/tests"
-ruff check "$MRKNOWITALL_SOURCE/src" "$MRKNOWITALL_SOURCE/tests"
 
 {
   echo "started=$(date -Is)"
   echo "host=$(hostname -f)"
   echo "job_id=${SLURM_JOB_ID:-none}"
-  echo "sprout_source=$SPROUT_SOURCE"
-  echo "sprout_test_run=$SPROUT_TEST_RUN"
-  echo "mrknowitall_source=$MRKNOWITALL_SOURCE"
-  echo "backbone=$MRKNOWITALL_BACKBONE"
+  echo "genus_candidates=$GENUS_CANDIDATES"
+  echo "genera=$(paste -sd, "$GENUS_CANDIDATES")"
   echo "reference_build_workers=$BUILD_WORKERS"
+  echo "tree_workers=$TREE_WORKERS"
   git -C "$SPROUT_SOURCE" rev-parse HEAD | sed 's/^/sprout_commit=/'
   git -C "$MRKNOWITALL_SOURCE" rev-parse HEAD | sed 's/^/mrknowitall_commit=/'
 } | tee RUN_PROVENANCE.txt
 
 sprout-ref build-kew-panel \
-  --level family \
-  --parent-file "$SPROUT_TEST_RUN/sprout_test.order_candidates.txt" \
+  --level species \
+  --parent-file "$GENUS_CANDIDATES" \
   --backbone "$MRKNOWITALL_BACKBONE" \
-  --output family_reference \
-  --representatives 4 \
+  --output species_reference \
+  --representatives 1 \
   --pool-multiplier 2 \
   --minimum-recovered-loci 50 \
   --download-workers 8 \
   --threads "$BUILD_WORKERS"
 
 grep -F -x -f "$SPROUT_TEST_RUN/gene_list.txt" \
-  family_reference/gene.list.txt > gene_list.txt
+  species_reference/gene.list.txt > gene_list.txt
 gene_count=$(wc -l < gene_list.txt)
 [[ "$gene_count" -gt 0 ]] || { echo "No shared query/reference genes" >&2; exit 3; }
+
 python "$SPROUT_SOURCE/02_exon_trees.py" \
-  -t "$THREADS" -p "$PROJECT" -g gene_list.txt \
+  -t "$TREE_WORKERS" -p "$PROJECT" -g gene_list.txt \
   -e "$SPROUT_TEST_RUN/exon" \
-  -r family_reference/ref \
-  --output_phylo family_phylo
-if ! grep -R -F -q --include='*.tre' "$PROJECT" family_phylo; then
-  echo "No query leaf contains project token '$PROJECT'; refusing to emit all-zero scores" >&2
+  -r species_reference/ref \
+  --output_phylo species_phylo
+if ! grep -R -F -q --include='*.tre' "$PROJECT" species_phylo; then
+  echo "No query leaf contains project token '$PROJECT'; refusing all-zero scores" >&2
   exit 5
 fi
+
 python "$SPROUT_SOURCE/03_distance_matrices.py" \
-  -t "$THREADS" -p "$PROJECT" -g gene_list.txt --threshold 1 \
-  --input_phylo family_phylo --output_tree family_matrix
-cp "$PROJECT.cumulative_dist.csv" "$PROJECT.family.cumulative_dist.csv"
+  -t "$TREE_WORKERS" -p "$PROJECT" -g gene_list.txt --threshold 1 \
+  --input_phylo species_phylo --output_tree species_matrix
+cp "$PROJECT.cumulative_dist.csv" "$PROJECT.species.cumulative_dist.csv"
 python "$SPROUT_SOURCE/04_prediction.py" \
-  -i "$PROJECT.family.cumulative_dist.csv" \
-  -o "$PROJECT.predictions_family.csv" \
-  -tl f -z 0 \
-  -to "$PROJECT.family_candidates.txt"
+  -i "$PROJECT.species.cumulative_dist.csv" \
+  -o "$PROJECT.predictions_species.csv" \
+  -tl s -z 0 \
+  -to "$PROJECT.species_candidates.txt"
 
 {
   echo "finished=$(date -Is)"
   echo "shared_genes=$gene_count"
-  echo "reference_loci=$(find family_reference/ref -type f -name '*.fasta' | wc -l)"
-  echo "family_trees=$(find family_phylo -type f -name '*.tre' | wc -l)"
-  echo "family_ranking:"
-  cat "$PROJECT.predictions_family.csv"
+  echo "reference_loci=$(find species_reference/ref -type f -name '*.fasta' | wc -l)"
+  echo "species_trees=$(find species_phylo -type f -name '*.tre' | wc -l)"
+  echo "species_ranking:"
+  cat "$PROJECT.predictions_species.csv"
+  echo "species_candidates:"
+  cat "$PROJECT.species_candidates.txt"
 } | tee RUN_SUMMARY.txt
 touch SUCCESS

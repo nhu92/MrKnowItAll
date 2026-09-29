@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from sprout_refbuilder.clade import BalancedKewPanelBuilder, read_taxon_candidates
-from sprout_refbuilder.models import KewRecord
+from sprout_refbuilder.clade import BalancedKewPanelBuilder, read_taxon_candidates, taxon_name
+from sprout_refbuilder.models import KewRecord, Taxonomy
 
 
 def write(path: Path, text: str) -> None:
@@ -51,6 +51,11 @@ def test_read_taxon_candidates_from_txt_and_csv(tmp_path: Path) -> None:
     csv_path = tmp_path / "predictions.csv"
     write(csv_path, "row_name,z_score\nRosales,7.3\nFabales,0.5\n")
     assert read_taxon_candidates(csv_path, minimum_z=1.0) == ["Rosales"]
+
+
+def test_species_taxon_name_is_binomial() -> None:
+    taxonomy = Taxonomy("Rosales", "Moraceae", "Artocarpus", "heterophyllus")
+    assert taxon_name(taxonomy, "species") == "Artocarpus_heterophyllus"
 
 
 @pytest.mark.parametrize("workers", [1, 2])

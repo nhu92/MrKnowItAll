@@ -28,6 +28,13 @@ class CladeRecovery:
     recovered_loci: int
 
 
+def taxon_name(taxonomy: Taxonomy, level: str) -> str:
+    """Return the unambiguous SPrOUT label for a requested taxonomy level."""
+    if level == "species":
+        return f"{taxonomy.genus}_{taxonomy.species}"
+    return getattr(taxonomy, level)
+
+
 def _load_locus(path: Path) -> LocusBackbone:
     """Load one locus inside a worker instead of copying the full backbone to every process."""
     records = tuple(read_fasta(path))
@@ -71,7 +78,7 @@ def _evaluate_locus(
                     "gene_id": gene_id,
                     "sequence_id": recovery.record.sequence_id,
                     "scientific_name": recovery.record.species,
-                    "target_group": getattr(recovery.taxonomy, level),
+                    "target_group": taxon_name(recovery.taxonomy, level),
                     "candidate": sequence.id,
                     **qc.to_dict(),
                 }
@@ -238,7 +245,7 @@ class BalancedKewPanelBuilder:
                 for item in accepted_by_gene.get(gene_id, [])
                 if item[1].record.sequence_id in final_ids
             ]
-            groups = {getattr(recovery.taxonomy, level).casefold() for _, recovery in accepted}
+            groups = {taxon_name(recovery.taxonomy, level).casefold() for _, recovery in accepted}
             if len(accepted) < 2 or len(groups) < 2:
                 continue
             alignment_jobs.append(
@@ -299,11 +306,11 @@ class BalancedKewPanelBuilder:
             "candidate_pool_recoveries": len(recoveries),
             "selected_recoveries": len(final_recoveries),
             "selected_groups": len(
-                {getattr(item.taxonomy, level) for item in final_recoveries}
+                {taxon_name(item.taxonomy, level) for item in final_recoveries}
             ),
             "omitted_groups": sorted(
                 set(pools)
-                - {getattr(item.taxonomy, level) for item in final_recoveries}
+                - {taxon_name(item.taxonomy, level) for item in final_recoveries}
             ),
             "loci": len(written_genes),
             "kew_release": metadata.get("release", "unknown"),
@@ -369,7 +376,7 @@ class BalancedKewPanelBuilder:
     ) -> dict[str, list[tuple[KewRecord, Taxonomy]]]:
         grouped: dict[str, list[tuple[KewRecord, Taxonomy]]] = defaultdict(list)
         for item in candidates:
-            grouped[getattr(item[1], level)].append(item)
+            grouped[taxon_name(item[1], level)].append(item)
         pool_size = self.representatives_per_taxon * self.pool_multiplier
         pools: dict[str, list[tuple[KewRecord, Taxonomy]]] = {}
         for group, rows in sorted(grouped.items()):
@@ -415,7 +422,7 @@ class BalancedKewPanelBuilder:
         grouped: dict[str, list[CladeRecovery]] = defaultdict(list)
         for recovery in recoveries:
             if accepted_per_record[recovery.record.sequence_id] >= self.minimum_recovered_loci:
-                grouped[getattr(recovery.taxonomy, level)].append(recovery)
+                grouped[taxon_name(recovery.taxonomy, level)].append(recovery)
         selected: list[CladeRecovery] = []
         for group in sorted(grouped):
             rows = sorted(
