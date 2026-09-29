@@ -86,14 +86,27 @@ def apply_taxonomy_corrections(
             write_fasta(path, output)
 
     _write_summaries(directory)
+    shadowed_replacements = sorted(
+        row.original
+        for row in replacements
+        if not replacement_hits[row.original]
+        and any(
+            exclusion_hits[excluded.original]
+            and _prefix_suffix(excluded.original, row.original) is not None
+            for excluded in exclusions
+        )
+    )
     return {
         "rules": len(corrections),
         "replacement_rules": len(replacements),
         "exclusion_rules": len(exclusions),
         "replaced_locus_sequences": sum(replacement_hits.values()),
         "excluded_locus_sequences": sum(exclusion_hits.values()),
+        "shadowed_by_exclusion": shadowed_replacements,
         "unmatched_replacements": sorted(
-            row.original for row in replacements if not replacement_hits[row.original]
+            row.original
+            for row in replacements
+            if not replacement_hits[row.original] and row.original not in shadowed_replacements
         ),
         "unmatched_exclusions": sorted(
             row.original for row in exclusions if not exclusion_hits[row.original]

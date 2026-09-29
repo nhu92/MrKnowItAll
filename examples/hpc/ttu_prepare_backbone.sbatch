@@ -55,6 +55,7 @@ summary = {
     "correction_rules": corrections.get("rules"),
     "replaced_locus_sequences": corrections.get("replaced_locus_sequences"),
     "excluded_locus_sequences": corrections.get("excluded_locus_sequences"),
+    "shadowed_by_exclusion": corrections.get("shadowed_by_exclusion"),
     "unmatched_replacements": corrections.get("unmatched_replacements"),
     "unmatched_exclusions": corrections.get("unmatched_exclusions"),
 }
