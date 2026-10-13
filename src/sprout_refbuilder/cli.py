@@ -114,6 +114,11 @@ def parser() -> argparse.ArgumentParser:
         help="Parallel locus workers for QC and alignment (use allocated HPC CPUs)",
     )
     kew_panel.add_argument("--python-aligner", action="store_true")
+    kew_panel.add_argument(
+        "--full-backbone-alignment",
+        action="store_true",
+        help="Use all curated backbone rows during MAFFT addition (comparison mode)",
+    )
 
     prefetch = commands.add_parser(
         "prefetch-kew-panel",
@@ -284,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
                 prefer_mafft=not args.python_aligner,
                 download_workers=args.download_workers,
                 workers=args.threads,
+                full_backbone_alignment=args.full_backbone_alignment,
             ).build(
                 args.level,
                 parents,

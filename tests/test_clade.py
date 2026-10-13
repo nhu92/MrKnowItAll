@@ -2,7 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from sprout_refbuilder.clade import BalancedKewPanelBuilder, read_taxon_candidates, taxon_name
+from sprout_refbuilder.clade import (
+    BalancedKewPanelBuilder,
+    _alignment_backbone,
+    _load_locus,
+    read_taxon_candidates,
+    taxon_name,
+)
 from sprout_refbuilder.models import KewRecord, Taxonomy
 
 
@@ -56,6 +62,31 @@ def test_read_taxon_candidates_from_txt_and_csv(tmp_path: Path) -> None:
 def test_species_taxon_name_is_binomial() -> None:
     taxonomy = Taxonomy("Rosales", "Moraceae", "Artocarpus", "heterophyllus")
     assert taxon_name(taxonomy, "species") == "Artocarpus_heterophyllus"
+
+
+def test_genus_alignment_keeps_focal_family_and_outgroups(tmp_path: Path) -> None:
+    locus_path = tmp_path / "4691.fasta"
+    names = [
+        "Brassicales_Brassicaceae_Brassica_oleracea_1",
+        "Brassicales_Brassicaceae_Brassica_rapa_2",
+        "Brassicales_Capparaceae_Capparis_spinosa_3",
+        "Brassicales_Capparaceae_Capparis_sepiaria_4",
+        "Rosales_Rosaceae_Rosa_canina_5",
+        "Rosales_Moraceae_Ficus_carica_6",
+        "Malvales_Malvaceae_Hibiscus_rosa_7",
+    ]
+    write(locus_path, "".join(f">{name}\nATGACG\n" for name in names))
+    locus = _load_locus(locus_path)
+    subset = _alignment_backbone(
+        locus, "genus", {"brassicales"}, {"brassicaceae"}, {"brassica"}
+    )
+    ids = {record.id for record in subset.records}
+    assert len(subset.records) == 5
+    assert names[0] in ids and names[1] in ids
+    assert names[2] in ids and names[3] not in ids
+    assert names[4] in ids and names[5] not in ids
+    assert names[6] in ids
+    assert subset.alignment_length == locus.alignment_length
 
 
 @pytest.mark.parametrize("workers", [1, 2])

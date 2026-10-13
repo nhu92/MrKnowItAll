@@ -5,7 +5,7 @@ import json
 import shutil
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from statistics import median
@@ -17,7 +17,7 @@ from .fasta import FastaRecord, parse_kew_gene_id, read_fasta, ungap, write_fast
 from .kew import KewClient
 from .models import KewRecord, Taxonomy
 from .qc import choose_candidate
-from .taxonomy import kew_taxonomy_index
+from .taxonomy import kew_taxonomy_index, taxonomy_from_header
 
 
 @dataclass(frozen=True)
@@ -90,19 +90,72 @@ def _evaluate_locus(
     return gene_id, accepted, qc_rows
 
 
+def _alignment_backbone(
+    locus: LocusBackbone,
+    level: str,
+    target_orders: set[str],
+    target_families: set[str],
+    target_genera: set[str],
+) -> LocusBackbone:
+    """Keep the focal clade plus a small spread of aligned sister/outgroup rows."""
+    focal = []
+    close: dict[str, FastaRecord] = {}
+    distant: dict[str, FastaRecord] = {}
+    unknown = []
+    for record in locus.records:
+        taxonomy = taxonomy_from_header(record.description)
+        if taxonomy is None:
+            unknown.append(record)
+            continue
+        order = taxonomy.order.casefold()
+        family = taxonomy.family.casefold()
+        genus = taxonomy.genus.casefold()
+        is_focal = (
+            order in target_orders
+            if level == "family"
+            else family in target_families
+            if level == "genus"
+            else genus in target_genera
+        )
+        if is_focal:
+            focal.append(record)
+        elif level == "genus" and order in target_orders:
+            close.setdefault(family, record)
+        elif level == "species" and family in target_families:
+            close.setdefault(genus, record)
+        elif level == "species" and order in target_orders:
+            close.setdefault(family, record)
+        else:
+            distant.setdefault(order, record)
+    selected = [*focal, *close.values(), *distant.values(), *unknown[:1]]
+    if len(selected) < 2:
+        selected = list(locus.records)
+    return replace(locus, records=tuple(selected))
+
+
 def _align_locus(
-    job: tuple[str, Path, list[FastaRecord], bool, Path],
-) -> tuple[str, str, int]:
+    job: tuple[
+        str, Path, list[FastaRecord], bool, Path, str,
+        set[str], set[str], set[str], bool,
+    ],
+) -> tuple[str, str, int, int]:
     """Align and write one final panel locus in an isolated process."""
-    gene_id, locus_path, candidates, prefer_mafft, output_path = job
+    (
+        gene_id, locus_path, candidates, prefer_mafft, output_path, level,
+        target_orders, target_families, target_genera, full_backbone_alignment,
+    ) = job
     locus = _load_locus(locus_path)
+    if not full_backbone_alignment:
+        locus = _alignment_backbone(
+            locus, level, target_orders, target_families, target_genera
+        )
     aligned, method = add_many_to_alignment(locus, candidates, prefer_mafft)
     wanted_ids = {sequence.id for sequence in candidates}
     panel_records = [sequence for sequence in aligned if sequence.id in wanted_ids]
     if len(panel_records) != len(candidates):
         raise RuntimeError(f"Lost a Kew reference while aligning locus {gene_id}")
     write_fasta(output_path, panel_records)
-    return gene_id, method, len(panel_records)
+    return gene_id, method, len(panel_records), len(locus.records)
 
 
 def _progress(stage: str, completed: int, total: int) -> None:
@@ -161,6 +214,7 @@ class BalancedKewPanelBuilder:
         prefer_mafft: bool = True,
         download_workers: int = 4,
         workers: int = 1,
+        full_backbone_alignment: bool = False,
     ) -> None:
         if representatives_per_taxon < 1:
             raise ValueError("representatives_per_taxon must be positive")
@@ -175,6 +229,7 @@ class BalancedKewPanelBuilder:
         self.prefer_mafft = prefer_mafft
         self.download_workers = max(1, download_workers)
         self.workers = max(1, workers)
+        self.full_backbone_alignment = full_backbone_alignment
 
     def build(
         self,
@@ -248,8 +303,12 @@ class BalancedKewPanelBuilder:
         reference_dir = self.output_dir / "ref"
         reference_dir.mkdir()
         alignment_methods: set[str] = set()
+        alignment_backbone_rows: list[int] = []
         written_genes: list[str] = []
         alignment_jobs = []
+        target_orders = {item.taxonomy.order.casefold() for item in final_recoveries}
+        target_families = {item.taxonomy.family.casefold() for item in final_recoveries}
+        target_genera = {item.taxonomy.genus.casefold() for item in final_recoveries}
         for gene_id, locus in sorted(self.backbone.loci.items()):
             accepted = [
                 item
@@ -266,6 +325,11 @@ class BalancedKewPanelBuilder:
                     [sequence for sequence, _ in accepted],
                     self.prefer_mafft,
                     reference_dir / f"{gene_id}.fasta",
+                    level,
+                    target_orders,
+                    target_families,
+                    target_genera,
+                    self.full_backbone_alignment,
                 )
             )
 
@@ -274,8 +338,9 @@ class BalancedKewPanelBuilder:
             flush=True,
         )
         alignment_results = self._run_locus_jobs(_align_locus, alignment_jobs, "alignment")
-        for gene_id, method, _ in alignment_results:
+        for gene_id, method, _, backbone_rows in alignment_results:
             alignment_methods.add(method)
+            alignment_backbone_rows.append(backbone_rows)
             written_genes.append(gene_id)
 
         if not written_genes:
@@ -326,6 +391,12 @@ class BalancedKewPanelBuilder:
             "loci": len(written_genes),
             "kew_release": metadata.get("release", "unknown"),
             "alignment_method": ",".join(sorted(alignment_methods)),
+            "alignment_backbone_policy": (
+                "full" if self.full_backbone_alignment else "focal-clade-plus-outgroups"
+            ),
+            "alignment_backbone_rows_min": min(alignment_backbone_rows),
+            "alignment_backbone_rows_max": max(alignment_backbone_rows),
+            "alignment_backbone_rows_median": median(alignment_backbone_rows),
             "selection": selection,
             "sprout_reference_argument": str(reference_dir),
             "gene_list": str(self.output_dir / "gene.list.txt"),
