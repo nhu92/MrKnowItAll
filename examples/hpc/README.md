@@ -76,4 +76,5 @@ python examples/hpc/zaratan_batch_to_genus.py \
 Each sample gets `order`, `family`, and `genus` results plus `RESULT.txt`. If the planned
 genus pool exceeds 120 Kew recovery files, the controller first screens tree branches
 using a small anchor panel. It keeps supported branches and their neighbors; unclear
-screens fall back to the full family. Change the trigger with `--branch-threshold`.
+screens fall back to the full family. A clearly dominant anchor can narrow weak secondary
+calls using both its score and locus votes. Change the trigger with `--branch-threshold`.
