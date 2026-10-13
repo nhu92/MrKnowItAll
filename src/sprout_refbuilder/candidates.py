@@ -6,15 +6,12 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import median
 
-
 LEVEL_INDEX = {"order": 0, "family": 1, "genus": 2}
 
 
 def taxon_from_sprout_header(header: str, level: str) -> str | None:
     """Extract a taxon from a SPrOUT reference leaf name."""
-    value = header.strip().strip("'")
-    if value.startswith("_R_"):
-        value = value[3:]
+    value = header.strip().strip("'").removeprefix("_R_")
     parts = value.split("_")
     index = LEVEL_INDEX[level]
     return parts[index] if len(parts) > index and parts[index] else None
