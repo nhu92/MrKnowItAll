@@ -123,7 +123,11 @@ def plan_genus_branches(
         descendant_genera: dict[int, set[str]] = {}
         descendant_tips: dict[int, list] = {}
 
-        def collect(node) -> set[str]:
+        def collect(
+            node,
+            descendant_genera=descendant_genera,
+            descendant_tips=descendant_tips,
+        ) -> set[str]:
             if node.is_terminal():
                 record = tip_record.get(id(node))
                 names = {record.species.split()[0]} if record is not None else set()
@@ -140,7 +144,7 @@ def plan_genus_branches(
 
         collect(family_root)
 
-        def cut(node, limit: int) -> list:
+        def cut(node, limit: int, descendant_genera=descendant_genera) -> list:
             names = descendant_genera[id(node)]
             if not names:
                 return []
@@ -161,7 +165,7 @@ def plan_genus_branches(
         return report
 
     branch_nodes.sort(
-        key=lambda row: (row[0].casefold(), sorted(tip_record[id(tip)].species for tip in row[2])[0])
+        key=lambda row: (row[0].casefold(), min(tip_record[id(tip)].species for tip in row[2]))
     )
     anchors_by_branch: dict[str, list] = {}
     for index, (family, _, tips) in enumerate(branch_nodes, start=1):
@@ -171,7 +175,7 @@ def plan_genus_branches(
             genus = tip_record[id(tip)].species.split()[0]
             by_genus.setdefault(genus, tip)
         choices = list(by_genus.values())
-        first = sorted(choices, key=lambda tip: tip_record[id(tip)].species)[0]
+        first = min(choices, key=lambda tip: tip_record[id(tip)].species)
         anchors = [first]
         if len(choices) > 1:
             second = max(

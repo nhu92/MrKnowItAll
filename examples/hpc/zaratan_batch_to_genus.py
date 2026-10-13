@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Run multiple real mixtures to genus on Zaratan from a login node.
 
 The login node only fetches Kew files and manages Slurm jobs. FASTQ processing,
@@ -18,7 +17,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 TERMINAL_FAILURES = {
@@ -37,7 +36,7 @@ PRINT_LOCK = threading.Lock()
 
 def say(message: str) -> None:
     with PRINT_LOCK:
-        print(f"{datetime.now(timezone.utc).isoformat()} {message}", flush=True)
+        print(f"{datetime.now(UTC).isoformat()} {message}", flush=True)
 
 
 def run_command(args: list[str], *, cwd: Path | None = None, env: dict | None = None) -> str:
@@ -353,7 +352,7 @@ def main() -> int:
             sample = futures[future]
             try:
                 say(future.result())
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 failed.append(sample)
                 say(f"{sample}: FAILED: {exc}")
     if failed:

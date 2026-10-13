@@ -7,8 +7,8 @@ from pathlib import Path
 
 from .assembly import assemble_with_hybpiper
 from .backbone import Backbone, install_backbone_archive
-from .builder import ReferenceBuilder
 from .branches import expand_genus_branches, plan_genus_branches
+from .builder import ReferenceBuilder
 from .candidates import select_mixture_candidates
 from .clade import BalancedKewPanelBuilder, read_taxon_candidates
 from .kew import DEFAULT_BASE_URL, KewClient
