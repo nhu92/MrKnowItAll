@@ -110,13 +110,12 @@ def _alignment_backbone(
         order = taxonomy.order.casefold()
         family = taxonomy.family.casefold()
         genus = taxonomy.genus.casefold()
-        is_focal = (
-            order in target_orders
-            if level == "family"
-            else family in target_families
-            if level == "genus"
-            else genus in target_genera
-        )
+        if level == "family":
+            is_focal = order in target_orders
+        elif level == "genus":
+            is_focal = family in target_families or genus in target_genera
+        else:
+            is_focal = genus in target_genera
         if is_focal:
             focal.append(record)
         elif level == "genus" and order in target_orders:

@@ -89,6 +89,23 @@ def test_genus_alignment_keeps_focal_family_and_outgroups(tmp_path: Path) -> Non
     assert subset.alignment_length == locus.alignment_length
 
 
+def test_genus_alignment_keeps_genus_when_family_name_changed(tmp_path: Path) -> None:
+    locus_path = tmp_path / "4691.fasta"
+    write(
+        locus_path,
+        ">Asparagales_Alliaceae_Allium_sativum_1\nATGACG\n"
+        ">Asparagales_Asparagaceae_Asparagus_officinalis_2\nATGACG\n"
+        ">Rosales_Rosaceae_Rosa_canina_3\nATGACG\n",
+    )
+    subset = _alignment_backbone(
+        _load_locus(locus_path),
+        "genus", {"asparagales"}, {"asparagaceae"}, {"allium"},
+    )
+    assert "Asparagales_Alliaceae_Allium_sativum_1" in {
+        record.id for record in subset.records
+    }
+
+
 @pytest.mark.parametrize("workers", [1, 2])
 def test_build_balanced_family_panel(tmp_path: Path, workers: int) -> None:
     backbone = tmp_path / "backbone"
