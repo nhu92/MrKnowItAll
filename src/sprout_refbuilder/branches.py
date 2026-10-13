@@ -233,17 +233,56 @@ def expand_genus_branches(
     all_genera = set(plan["all_genera"])
     unplaced_genera = set(plan.get("unplaced_genera", []))
     selected_branches = set()
+    evidence_by_family: dict[str, list[dict]] = defaultdict(list)
     with evidence_csv.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             if row.get("selected", "").casefold() != "true":
                 continue
             genus = row.get("taxon", "")
-            selected_branches.update(
-                branch["id"] for branch in branches if genus in branch["anchor_genera"]
-            )
+            for branch in branches:
+                if genus in branch["anchor_genera"]:
+                    selected_branches.add(branch["id"])
+                    evidence_by_family[branch["family"]].append(row)
     by_family: dict[str, list] = defaultdict(list)
     for branch in branches:
         by_family[branch["family"]].append(branch)
+    dominant_families = []
+    for family, rows in evidence_by_family.items():
+        # The general candidate selector intentionally keeps weak secondary calls. If one
+        # anchor is overwhelmingly supported, those weak calls should not force a full
+        # family-wide MAFFT panel. Diffuse evidence still fails open to the full family.
+        def metric(row: dict, key: str) -> float:
+            try:
+                return float(row.get(key) or 0)
+            except ValueError:
+                return 0.0
+
+        try:
+            ranked = sorted(rows, key=lambda row: metric(row, "aggregate_score"), reverse=True)
+            top = ranked[0]
+            top_score = metric(top, "aggregate_score")
+            runner_up = metric(ranked[1], "aggregate_score") if len(ranked) > 1 else 0.0
+            top_votes = metric(top, "locus_votes")
+            top_z = metric(top, "aggregate_z")
+        except IndexError:
+            continue
+        if top_z < 3 or top_votes < 10 or top_score < 2 * runner_up:
+            continue
+        vote_floor = max(3, round(top_votes * 0.1))
+        supported = {
+            row["taxon"] for row in ranked
+            if row is top or (
+                metric(row, "aggregate_score") >= 0.25 * top_score
+                and metric(row, "locus_votes") >= vote_floor
+            )
+        }
+        family_ids = {branch["id"] for branch in by_family[family]}
+        selected_branches.difference_update(family_ids)
+        selected_branches.update(
+            branch["id"] for branch in by_family[family]
+            if supported.intersection(branch["anchor_genera"])
+        )
+        dominant_families.append(family)
     missing = [
         family for family, rows in by_family.items()
         if not selected_branches.intersection({row["id"] for row in rows})
@@ -270,6 +309,7 @@ def expand_genus_branches(
     report = {
         "mode": mode,
         "selected_anchor_branches": sorted(selected_branches),
+        "dominant_families": sorted(dominant_families),
         "selected_genera": len(chosen),
         "total_genera": len(all_genera),
         "allowed_taxa_file": str(output),

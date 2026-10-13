@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from sprout_refbuilder.branches import expand_genus_branches, plan_genus_branches
@@ -90,3 +91,55 @@ def test_prefetch_allowed_groups(tmp_path: Path) -> None:
     ).prefetch("genus", ["FamA"], client, allowed_groups={"GenusA"})  # type: ignore[arg-type]
     assert report["candidate_groups"] == 1
     assert report["usable_recoveries"] == 1
+
+
+def test_dominant_anchor_narrows_weak_selected_branches(tmp_path: Path) -> None:
+    branches = [
+        {
+            "id": f"B{index:03d}", "family": "FamA", "genera": [f"Genus{index}"],
+            "anchor_genera": [f"Genus{index}"], "neighbor": None,
+        }
+        for index in range(10)
+    ]
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({
+        "branches": branches, "all_genera": [f"Genus{index}" for index in range(10)],
+        "unplaced_genera": [],
+    }), encoding="utf-8")
+    evidence = tmp_path / "evidence.csv"
+    header = "taxon,selected,locus_votes,aggregate_score,aggregate_z\n"
+    rows = ["Genus0,True,47,152,8"]
+    rows.extend(f"Genus{index},True,{10 if index == 1 else 2},{40 if index == 1 else 10},1"
+                for index in range(1, 10))
+    evidence.write_text(header + "\n".join(rows) + "\n", encoding="utf-8")
+    allowed = tmp_path / "allowed.txt"
+    result = expand_genus_branches(plan, evidence, allowed, tmp_path / "report.json")
+    assert result["mode"] == "branch_screened"
+    assert result["dominant_families"] == ["FamA"]
+    assert allowed.read_text(encoding="utf-8").splitlines() == ["Genus0", "Genus1"]
+
+
+def test_diffuse_anchors_keep_full_family_fallback(tmp_path: Path) -> None:
+    branches = [
+        {
+            "id": f"B{index:03d}", "family": "FamA", "genera": [f"Genus{index}"],
+            "anchor_genera": [f"Genus{index}"], "neighbor": None,
+        }
+        for index in range(10)
+    ]
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({
+        "branches": branches, "all_genera": [f"Genus{index}" for index in range(10)],
+        "unplaced_genera": [],
+    }), encoding="utf-8")
+    evidence = tmp_path / "evidence.csv"
+    evidence.write_text(
+        "taxon,selected,locus_votes,aggregate_score,aggregate_z\n"
+        + "".join(f"Genus{index},True,10,20,1\n" for index in range(10)),
+        encoding="utf-8",
+    )
+    result = expand_genus_branches(
+        plan, evidence, tmp_path / "allowed.txt", tmp_path / "report.json"
+    )
+    assert result["mode"] == "full_fallback"
+    assert result["selected_genera"] == 10
