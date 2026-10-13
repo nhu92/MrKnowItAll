@@ -8,6 +8,7 @@ Restarting this command resumes submitted and completed stages.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -49,6 +50,11 @@ def run_command(args: list[str], *, cwd: Path | None = None, env: dict | None = 
             f"stdout: {result.stdout[-2000:]}\nstderr: {result.stderr[-2000:]}"
         )
     return result.stdout.strip()
+
+
+def top_aggregate_taxon(predictions: Path) -> str:
+    with predictions.open(encoding="utf-8-sig", newline="") as handle:
+        return next(csv.DictReader(handle), {}).get("row_name", "")
 
 
 def sample_pairs(sample_root: Path, selected: set[str], excluded: set[str]) -> dict[str, tuple[Path, Path]]:
@@ -371,10 +377,13 @@ def process_sample(
         args.refine_memory, args.poll_seconds,
     )
     summary = sample_dir / "RESULT.txt"
+    evidence_candidates = (genus / "candidates.txt").read_text(encoding="utf-8").splitlines()
     summary.write_text(
         f"sample={sample}\norder={','.join((order / 'candidates.txt').read_text().splitlines())}"
         f"\nfamily={','.join((family / 'candidates.txt').read_text().splitlines())}"
-        f"\ngenus={','.join((genus / 'candidates.txt').read_text().splitlines())}\n",
+        f"\ngenus={','.join(evidence_candidates)}"
+        f"\ngenus_top_by_evidence={evidence_candidates[0] if evidence_candidates else ''}"
+        f"\ngenus_top_by_sprout_score={top_aggregate_taxon(genus / 'predictions.csv')}\n",
         encoding="utf-8",
     )
     say(f"{sample}: finished order → family → genus")
