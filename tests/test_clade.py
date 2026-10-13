@@ -6,8 +6,8 @@ from sprout_refbuilder.clade import (
     BalancedKewPanelBuilder,
     _alignment_backbone,
     _load_locus,
-    read_taxon_candidates,
     panel_markdown,
+    read_taxon_candidates,
     taxon_name,
 )
 from sprout_refbuilder.models import KewRecord, Taxonomy
