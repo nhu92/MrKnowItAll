@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from sprout_refbuilder.kew import KewClient
+from sprout_refbuilder.models import KewRecord
 
 
 def test_sync_search_and_fetch(tmp_path: Path) -> None:
@@ -43,3 +44,12 @@ def test_offline_cache_miss_fails_without_http(tmp_path: Path) -> None:
         pytest.raises(RuntimeError, match="Kew cache miss in offline mode"),
     ):
         client.sync()
+
+
+def test_offline_recovery_miss_fails_without_http(tmp_path: Path) -> None:
+    record = KewRecord("INSDC", "ERR1", "read", "Abatia rugosa", "PAFTOL", "a.fasta")
+    with (
+        KewClient(tmp_path, "https://example.test/", offline=True) as client,
+        pytest.raises(RuntimeError, match="Kew recovery is missing"),
+    ):
+        client.fetch_recovery(record)

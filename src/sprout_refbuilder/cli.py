@@ -8,6 +8,7 @@ from pathlib import Path
 from .assembly import assemble_with_hybpiper
 from .backbone import Backbone, install_backbone_archive
 from .builder import ReferenceBuilder
+from .branches import expand_genus_branches, plan_genus_branches
 from .candidates import select_mixture_candidates
 from .clade import BalancedKewPanelBuilder, read_taxon_candidates
 from .kew import DEFAULT_BASE_URL, KewClient
@@ -100,6 +101,7 @@ def parser() -> argparse.ArgumentParser:
     )
     kew_panel.add_argument("--backbone", required=True, type=Path)
     kew_panel.add_argument("--output", required=True, type=Path)
+    kew_panel.add_argument("--allowed-taxa-file", type=Path)
     kew_panel.add_argument("--representatives", type=int, default=4)
     kew_panel.add_argument("--pool-multiplier", type=int, default=2)
     kew_panel.add_argument("--minimum-recovered-loci", type=int, default=50)
@@ -124,10 +126,29 @@ def parser() -> argparse.ArgumentParser:
     prefetch.add_argument("--top", type=int, default=0)
     prefetch.add_argument("--backbone", required=True, type=Path)
     prefetch.add_argument("--report", required=True, type=Path)
+    prefetch.add_argument("--allowed-taxa-file", type=Path)
     prefetch.add_argument("--representatives", type=int, default=4)
     prefetch.add_argument("--pool-multiplier", type=int, default=2)
     prefetch.add_argument("--minimum-recovered-loci", type=int, default=50)
     prefetch.add_argument("--download-workers", type=int, default=4)
+
+    branch_plan = commands.add_parser(
+        "plan-genus-branches", help="Use Kew's species tree to plan large-family screening"
+    )
+    branch_plan.add_argument("--parent-file", required=True, type=Path)
+    branch_plan.add_argument("--backbone", required=True, type=Path)
+    branch_plan.add_argument("--output", required=True, type=Path)
+    branch_plan.add_argument("--threshold", type=int, default=120)
+    branch_plan.add_argument("--max-group-genera", type=int, default=20)
+    branch_plan.add_argument("--max-anchor-genera", type=int, default=120)
+
+    branch_expand = commands.add_parser(
+        "expand-genus-branches", help="Expand supported anchor branches to a genus list"
+    )
+    branch_expand.add_argument("--plan", required=True, type=Path)
+    branch_expand.add_argument("--evidence", required=True, type=Path)
+    branch_expand.add_argument("--output", required=True, type=Path)
+    branch_expand.add_argument("--report", required=True, type=Path)
 
     candidates = commands.add_parser(
         "select-candidates",
@@ -209,6 +230,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(report, indent=2))
         return 0
+    if args.command == "expand-genus-branches":
+        print(
+            json.dumps(
+                expand_genus_branches(args.plan, args.evidence, args.output, args.report),
+                indent=2,
+            )
+        )
+        return 0
     if args.command == "web":
         import uvicorn
 
@@ -255,7 +284,14 @@ def main(argv: list[str] | None = None) -> int:
                 prefer_mafft=not args.python_aligner,
                 download_workers=args.download_workers,
                 workers=args.threads,
-            ).build(args.level, parents, client)
+            ).build(
+                args.level,
+                parents,
+                client,
+                allowed_groups=set(read_taxon_candidates(args.allowed_taxa_file))
+                if args.allowed_taxa_file
+                else None,
+            )
             print(json.dumps(report, indent=2))
             return 0
         if args.command == "prefetch-kew-panel":
@@ -272,10 +308,29 @@ def main(argv: list[str] | None = None) -> int:
                 pool_multiplier=args.pool_multiplier,
                 minimum_recovered_loci=args.minimum_recovered_loci,
                 download_workers=args.download_workers,
-            ).prefetch(args.level, parents, client)
+            ).prefetch(
+                args.level,
+                parents,
+                client,
+                allowed_groups=set(read_taxon_candidates(args.allowed_taxa_file))
+                if args.allowed_taxa_file
+                else None,
+            )
             args.report.parent.mkdir(parents=True, exist_ok=True)
             args.report.write_text(json.dumps(report, indent=2), encoding="utf-8")
             print(json.dumps(report, indent=2))
+            return 0
+        if args.command == "plan-genus-branches":
+            report = plan_genus_branches(
+                client,
+                args.backbone,
+                args.parent_file,
+                args.output,
+                threshold=args.threshold,
+                max_group_genera=args.max_group_genera,
+                max_anchor_genera=args.max_anchor_genera,
+            )
+            print(json.dumps({key: value for key, value in report.items() if key != "branches"}, indent=2))
             return 0
         if args.command == "demo-mix7":
             report = run_mix7_demo(

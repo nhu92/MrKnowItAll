@@ -157,6 +157,8 @@ class KewClient:
         destination = self.cache_dir / "recoveries" / record.recovery_file
         if destination.exists() and destination.stat().st_size > 0:
             return destination
+        if self.offline:
+            raise RuntimeError(f"Kew recovery is missing from the offline cache: {destination}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         response = self.http.get(urljoin(self.base_url, "fasta/by_recovery/" + quote(record.recovery_file)))
         response.raise_for_status()

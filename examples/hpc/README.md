@@ -44,9 +44,36 @@ sbatch ttu_prepare_backbone.sbatch
 ## Other scripts
 
 - `zaratan_sprout_testrun.sbatch`: small SPrOUT test on UMD Zaratan.
+- `zaratan_batch_to_genus.py`: one login-node command for multiple real samples on Zaratan.
+- `zaratan_query_order.sbatch`: query assembly and order prediction on a compute node.
+- `zaratan_refine_stage.sbatch`: offline family, branch-anchor, or genus refinement.
 - `ttu_kew_family_refinement.sbatch`: build family references and repeat SPrOUT.
 - `ttu_kew_genus_refinement.sbatch`: build genus references and repeat SPrOUT.
 - `ttu_kew_species_refinement.sbatch`: optional species-level experiment.
 
 The separate refinement scripts are useful for debugging. For a normal sample, use
 `ttu_mix_to_genus.sbatch`.
+
+## Zaratan: several real samples
+
+Zaratan compute nodes cannot reach Kew. The batch controller downloads Kew recoveries on
+the login node and submits each analysis stage to Slurm. It can run several samples at once
+and resumes stages that already succeeded or have a recorded Slurm job ID.
+
+```bash
+source "$HOME/miniconda3/etc/profile.d/conda.sh"
+conda activate sprout
+python examples/hpc/zaratan_batch_to_genus.py \
+  --sample-root /scratch/zt1/project/jmeng-prj/user/nhu/202610/realmixes \
+  --run-root /scratch/zt1/project/jmeng-prj/user/nhu/mrknowitall_test_20261013/realmix_runs \
+  --repo /home/nhu/mrknowitall_test_20261013/MrKnowItAll \
+  --sprout /home/nhu/mrknowitall_test_20261013/SPrOUT \
+  --backbone /home/nhu/mrknowitall_test_20261013/backbone_corrected \
+  --cache /scratch/zt1/project/jmeng-prj/user/nhu/mrknowitall_test_20261013/kew_cache \
+  --max-parallel-samples 3 --exclude EMseq001
+```
+
+Each sample gets `order`, `family`, and `genus` results plus `RESULT.txt`. If the planned
+genus pool exceeds 120 Kew recovery files, the controller first screens tree branches
+using a small anchor panel. It keeps supported branches and their neighbors; unclear
+screens fall back to the full family. Change the trigger with `--branch-threshold`.

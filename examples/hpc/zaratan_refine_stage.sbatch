@@ -35,6 +35,12 @@ case "$LEVEL" in
   genus) REPRESENTATIVES=2; MAX_CANDIDATES=20 ;;
   *) echo "SPROUT_LEVEL must be family or genus" >&2; exit 2 ;;
 esac
+REPRESENTATIVES=${SPROUT_REF_REPRESENTATIVES:-$REPRESENTATIVES}
+POOL_MULTIPLIER=${SPROUT_REF_POOL_MULTIPLIER:-2}
+ALLOWED_TAXA_FILE=${SPROUT_ALLOWED_TAXA_FILE:-}
+if [[ -n "$ALLOWED_TAXA_FILE" ]]; then
+  [[ -s "$ALLOWED_TAXA_FILE" ]] || { echo "Missing allowed taxa: $ALLOWED_TAXA_FILE" >&2; exit 2; }
+fi
 
 for path in "$PARENT_FILE" "$QUERY_EXON" "$QUERY_GENE_LIST" "$SPROUT_SOURCE" \
   "$MRKNOWITALL_SOURCE/pyproject.toml" "$MRKNOWITALL_BACKBONE" "$KEW_CACHE"; do
@@ -48,6 +54,11 @@ mkdir -p "$work"
 cp -a "$QUERY_EXON" "$work/exon"
 cp "$QUERY_GENE_LIST" "$work/query_gene_list.txt"
 cp "$PARENT_FILE" "$work/parent_candidates.txt"
+allowed_args=()
+if [[ -n "$ALLOWED_TAXA_FILE" ]]; then
+  cp "$ALLOWED_TAXA_FILE" "$work/allowed_taxa.txt"
+  allowed_args=(--allowed-taxa-file allowed_taxa.txt)
+fi
 cd "$work"
 
 source "$CONDA_SH"
@@ -58,7 +69,8 @@ export SPROUT_REF_OFFLINE=1
 sprout-ref --cache "$KEW_CACHE" build-kew-panel \
   --level "$LEVEL" --parent-file parent_candidates.txt \
   --backbone "$MRKNOWITALL_BACKBONE" --output reference \
-  --representatives "$REPRESENTATIVES" --pool-multiplier 2 \
+  "${allowed_args[@]}" \
+  --representatives "$REPRESENTATIVES" --pool-multiplier "$POOL_MULTIPLIER" \
   --minimum-recovered-loci 50 --download-workers 8 --threads "$BUILD_WORKERS"
 
 grep -F -x -f query_gene_list.txt reference/gene.list.txt > gene_list.txt

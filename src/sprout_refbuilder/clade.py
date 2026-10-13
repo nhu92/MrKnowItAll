@@ -176,7 +176,13 @@ class BalancedKewPanelBuilder:
         self.download_workers = max(1, download_workers)
         self.workers = max(1, workers)
 
-    def build(self, level: str, parent_taxa: list[str], client: KewClient) -> dict:
+    def build(
+        self,
+        level: str,
+        parent_taxa: list[str],
+        client: KewClient,
+        allowed_groups: set[str] | None = None,
+    ) -> dict:
         level = level.casefold()
         if level not in self.PARENT_RANK:
             raise ValueError(f"level must be one of {sorted(self.PARENT_RANK)}")
@@ -190,6 +196,11 @@ class BalancedKewPanelBuilder:
         taxonomy_index = kew_taxonomy_index(client.fetch_species_tree())
         candidates = self._records_in_parents(level, parents, client.records(), taxonomy_index)
         pools = self._balanced_pools(level, candidates)
+        if allowed_groups is not None:
+            allowed = {name.casefold() for name in allowed_groups}
+            pools = {name: rows for name, rows in pools.items() if name.casefold() in allowed}
+            if not pools:
+                raise ValueError("No Kew groups matched --allowed-taxa-file")
         recoveries = self._download_pool(pools, client)
         if not recoveries:
             raise LookupError(
@@ -326,7 +337,13 @@ class BalancedKewPanelBuilder:
         shutil.make_archive(str(self.output_dir) + "_bundle", "zip", self.output_dir)
         return report
 
-    def prefetch(self, level: str, parent_taxa: list[str], client: KewClient) -> dict:
+    def prefetch(
+        self,
+        level: str,
+        parent_taxa: list[str],
+        client: KewClient,
+        allowed_groups: set[str] | None = None,
+    ) -> dict:
         """Download the balanced candidate pool without running QC or alignment.
 
         This is intended for HPC systems where login nodes have internet access but compute
@@ -344,6 +361,11 @@ class BalancedKewPanelBuilder:
         taxonomy_index = kew_taxonomy_index(client.fetch_species_tree())
         candidates = self._records_in_parents(level, parents, client.records(), taxonomy_index)
         pools = self._balanced_pools(level, candidates)
+        if allowed_groups is not None:
+            allowed = {name.casefold() for name in allowed_groups}
+            pools = {name: rows for name, rows in pools.items() if name.casefold() in allowed}
+            if not pools:
+                raise ValueError("No Kew groups matched --allowed-taxa-file")
         recoveries = self._download_pool(pools, client)
         usable_by_group: dict[str, int] = defaultdict(int)
         for recovery in recoveries:
