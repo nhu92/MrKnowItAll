@@ -88,8 +88,19 @@ ruff check "$MRKNOWITALL_SOURCE/src" "$MRKNOWITALL_SOURCE/tests"
 
 query_dir="$RUN/00_query"
 if [[ "$SAMPLE_FRACTION" == "1" || "$SAMPLE_FRACTION" == "1.0" ]]; then
-  input_r1="$READ1"
-  input_r2="$READ2"
+  fastq_suffix() {
+    case "$1" in
+      *.fastq.gz) printf '.fastq.gz' ;;
+      *.fq.gz) printf '.fq.gz' ;;
+      *.fastq) printf '.fastq' ;;
+      *.fq) printf '.fq' ;;
+      *) echo "Unsupported read filename: $1" >&2; return 2 ;;
+    esac
+  }
+  input_r1="$query_dir/$PROJECT.R1$(fastq_suffix "$READ1")"
+  input_r2="$query_dir/$PROJECT.R2$(fastq_suffix "$READ2")"
+  ln -s "$READ1" "$input_r1"
+  ln -s "$READ2" "$input_r2"
 else
   input_r1="$query_dir/$PROJECT.R1.fastq.gz"
   input_r2="$query_dir/$PROJECT.R2.fastq.gz"
