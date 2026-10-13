@@ -126,7 +126,10 @@ def submit_stage(
     else:
         if result_dir.exists():
             raise RuntimeError(f"{stage}: partial results exist without a recorded job: {result_dir}")
-        env = os.environ.copy()
+        env = {
+            key: value for key, value in os.environ.items()
+            if not key.startswith(("SPROUT_", "MRKNOWITALL_"))
+        }
         env.update(environment)
         job_id = run_command(
             ["sbatch", "--parsable", "--export=ALL", f"--mem={memory}", script.name],
