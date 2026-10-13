@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import httpx
+import pytest
 
 from sprout_refbuilder.kew import KewClient
 
@@ -34,3 +35,9 @@ def test_sync_search_and_fetch(tmp_path: Path) -> None:
     assert match.recovery_file == "INSDC.ERR1.Abatia_rugosa.a353.fasta"
     assert genome.recovery_file == "INSDC.GCA_01.2.Testa_species.a353.fasta"
     assert path.read_text().startswith(">4691")
+
+
+def test_offline_cache_miss_fails_without_http(tmp_path: Path) -> None:
+    with KewClient(tmp_path, "https://example.test/", offline=True) as client:
+        with pytest.raises(RuntimeError, match="Kew cache miss in offline mode"):
+            client.sync()

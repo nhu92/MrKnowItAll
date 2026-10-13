@@ -326,6 +326,41 @@ class BalancedKewPanelBuilder:
         shutil.make_archive(str(self.output_dir) + "_bundle", "zip", self.output_dir)
         return report
 
+    def prefetch(self, level: str, parent_taxa: list[str], client: KewClient) -> dict:
+        """Download the balanced candidate pool without running QC or alignment.
+
+        This is intended for HPC systems where login nodes have internet access but compute
+        nodes do not. The cached metadata, tree, and recovery FASTAs can be read later by an
+        offline ``build-kew-panel`` job.
+        """
+        level = level.casefold()
+        if level not in self.PARENT_RANK:
+            raise ValueError(f"level must be one of {sorted(self.PARENT_RANK)}")
+        parents = {value.strip().casefold() for value in parent_taxa if value.strip()}
+        if not parents:
+            raise ValueError(f"At least one parent {self.PARENT_RANK[level]} is required")
+
+        metadata = client.sync()
+        taxonomy_index = kew_taxonomy_index(client.fetch_species_tree())
+        candidates = self._records_in_parents(level, parents, client.records(), taxonomy_index)
+        pools = self._balanced_pools(level, candidates)
+        recoveries = self._download_pool(pools, client)
+        usable_by_group: dict[str, int] = defaultdict(int)
+        for recovery in recoveries:
+            usable_by_group[taxon_name(recovery.taxonomy, level)] += 1
+        return {
+            "schema_version": 1,
+            "level": level,
+            "parent_rank": self.PARENT_RANK[level],
+            "parent_taxa": parent_taxa,
+            "kew_release": metadata.get("release", "unknown"),
+            "candidate_records": len(candidates),
+            "candidate_groups": len(pools),
+            "pool_records": sum(len(rows) for rows in pools.values()),
+            "usable_recoveries": len(recoveries),
+            "usable_by_group": dict(sorted(usable_by_group.items())),
+        }
+
     def _run_locus_jobs(self, function, jobs: list[tuple], stage: str) -> list[tuple]:
         """Run independent locus jobs, preserving a low-overhead serial path for one worker."""
         if not jobs:

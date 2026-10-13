@@ -38,9 +38,11 @@ class KewClient:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 120.0,
         transport: httpx.BaseTransport | None = None,
+        offline: bool = False,
     ) -> None:
         self.cache_dir = cache_dir
         self.base_url = base_url.rstrip("/") + "/"
+        self.offline = offline
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.http = httpx.Client(
             timeout=timeout,
@@ -171,6 +173,10 @@ class KewClient:
         return self._get_bytes(relative).decode("utf-8", errors="replace")
 
     def _get_bytes(self, relative: str) -> bytes:
+        if self.offline:
+            raise RuntimeError(
+                f"Kew cache miss in offline mode: {urljoin(self.base_url, relative)}"
+            )
         response = self.http.get(urljoin(self.base_url, relative))
         response.raise_for_status()
         return response.content

@@ -113,6 +113,22 @@ def parser() -> argparse.ArgumentParser:
     )
     kew_panel.add_argument("--python-aligner", action="store_true")
 
+    prefetch = commands.add_parser(
+        "prefetch-kew-panel",
+        help="Download a balanced Kew candidate pool for a later offline HPC job",
+    )
+    prefetch.add_argument("--level", required=True, choices=["family", "genus", "species"])
+    prefetch.add_argument("--parent-taxon", action="append", default=[])
+    prefetch.add_argument("--parent-file", type=Path)
+    prefetch.add_argument("--minimum-z", type=float)
+    prefetch.add_argument("--top", type=int, default=0)
+    prefetch.add_argument("--backbone", required=True, type=Path)
+    prefetch.add_argument("--report", required=True, type=Path)
+    prefetch.add_argument("--representatives", type=int, default=4)
+    prefetch.add_argument("--pool-multiplier", type=int, default=2)
+    prefetch.add_argument("--minimum-recovered-loci", type=int, default=50)
+    prefetch.add_argument("--download-workers", type=int, default=4)
+
     candidates = commands.add_parser(
         "select-candidates",
         help="Combine aggregate scores with per-query nearest-reference locus votes",
@@ -199,7 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         uvicorn.run("sprout_refbuilder.web:app", host=args.host, port=args.port, reload=False)
         return 0
 
-    with KewClient(cache, args.kew_base_url) as client:
+    offline = os.environ.get("SPROUT_REF_OFFLINE", "").casefold() in {"1", "true", "yes"}
+    with KewClient(cache, args.kew_base_url, offline=offline) as client:
         if args.command == "sync":
             print(json.dumps(client.sync(force=True), indent=2))
             return 0
@@ -239,6 +256,25 @@ def main(argv: list[str] | None = None) -> int:
                 download_workers=args.download_workers,
                 workers=args.threads,
             ).build(args.level, parents, client)
+            print(json.dumps(report, indent=2))
+            return 0
+        if args.command == "prefetch-kew-panel":
+            parents = list(args.parent_taxon)
+            if args.parent_file:
+                parents.extend(
+                    read_taxon_candidates(args.parent_file, args.minimum_z, args.top)
+                )
+            parents = list(dict.fromkeys(parents))
+            report = BalancedKewPanelBuilder(
+                args.backbone,
+                args.report.parent / ".prefetch-only",
+                representatives_per_taxon=args.representatives,
+                pool_multiplier=args.pool_multiplier,
+                minimum_recovered_loci=args.minimum_recovered_loci,
+                download_workers=args.download_workers,
+            ).prefetch(args.level, parents, client)
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(json.dumps(report, indent=2), encoding="utf-8")
             print(json.dumps(report, indent=2))
             return 0
         if args.command == "demo-mix7":
