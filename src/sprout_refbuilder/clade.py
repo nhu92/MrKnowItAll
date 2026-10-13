@@ -35,6 +35,43 @@ def taxon_name(taxonomy: Taxonomy, level: str) -> str:
     return getattr(taxonomy, level)
 
 
+def panel_markdown(report: dict) -> str:
+    """One-page summary next to the machine-readable panel and QC files."""
+    parents = ", ".join(report["parent_taxa"]) or "not specified"
+    omitted = ", ".join(report["omitted_groups"][:20]) or "none"
+    if len(report["omitted_groups"]) > 20:
+        omitted += f" (and {len(report['omitted_groups']) - 20} more)"
+    lines = [
+        f"# MrKnowItAll {report['level']} reference panel", "",
+        f"Parent {report['parent_rank']}: {parents}", "",
+        "| Item | Value |", "| --- | ---: |",
+        f"| Kew release | {report['kew_release']} |",
+        f"| Candidate recoveries | {report['candidate_pool_recoveries']} |",
+        f"| Selected recoveries | {report['selected_recoveries']} |",
+        f"| Selected target groups | {report['selected_groups']} |",
+        f"| Genes retained | {report['loci']} |",
+        f"| Alignment | {report['alignment_method']} |",
+        f"| Alignment backbone | {report['alignment_backbone_policy']} |",
+        "", f"Omitted groups: {omitted}.", "",
+        "## Selected references", "",
+        "| Taxon | Species | Accession | Recovered genes | Accepted genes |",
+        "| --- | --- | --- | ---: | ---: |",
+    ]
+    for row in report["selection"][:50]:
+        group = row[report["level"]]
+        lines.append(
+            f"| {group} | {row['scientific_name']} | {row['sequence_id']} | "
+            f"{row['recovered_loci']} | {row['accepted_loci']} |"
+        )
+    if len(report["selection"]) > 50:
+        lines.extend(["", f"Showing 50 of {len(report['selection'])} references; see `selection.tsv` for all."])
+    lines.extend([
+        "", "Use the `ref/` FASTA directory with SPrOUT's `02_exon_trees.py -r` option.",
+        "See `panel_report.json`, `selection.tsv`, and `qc.json` for the full provenance and QC.", "",
+    ])
+    return "\n".join(lines)
+
+
 def _load_locus(path: Path) -> LocusBackbone:
     """Load one locus inside a worker instead of copying the full backbone to every process."""
     records = tuple(read_fasta(path))
@@ -404,6 +441,9 @@ class BalancedKewPanelBuilder:
             json.dumps(report, indent=2), encoding="utf-8"
         )
         self._write_selection_tsv(selection)
+        (self.output_dir / "PANEL_SUMMARY.md").write_text(
+            panel_markdown(report), encoding="utf-8"
+        )
         shutil.make_archive(str(self.output_dir) + "_bundle", "zip", self.output_dir)
         return report
 

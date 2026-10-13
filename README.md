@@ -111,6 +111,9 @@ sprout-ref build \
 ```
 
 The resulting `ref/` directory can be used with SPrOUT `02_exon_trees.py -r`.
+Each built Kew panel also includes `PANEL_SUMMARY.md`, a short human-readable summary of
+reference coverage and QC; the complete machine-readable records remain in
+`panel_report.json`, `selection.tsv`, and `qc.json`.
 
 ## Web app
 

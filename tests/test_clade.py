@@ -7,6 +7,7 @@ from sprout_refbuilder.clade import (
     _alignment_backbone,
     _load_locus,
     read_taxon_candidates,
+    panel_markdown,
     taxon_name,
 )
 from sprout_refbuilder.models import KewRecord, Taxonomy
@@ -137,3 +138,7 @@ def test_build_balanced_family_panel(tmp_path: Path, workers: int) -> None:
     assert "Rosales_FamA_GenusA_speciesa_KEW_A1" in alignment
     assert "Rosales_FamB_GenusB_speciesb_KEW_B1" in alignment
     assert Path(str(output) + "_bundle.zip").exists()
+    summary = (output / "PANEL_SUMMARY.md").read_text(encoding="utf-8")
+    assert "Genes retained | 1" in summary
+    assert "GenusA speciesa" in summary
+    assert summary == panel_markdown(report)
