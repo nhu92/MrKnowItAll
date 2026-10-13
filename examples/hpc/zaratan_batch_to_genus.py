@@ -118,8 +118,7 @@ def submit_stage(
     stage_dir.mkdir(parents=True, exist_ok=True)
     (stage_dir / "logs").mkdir(exist_ok=True)
     script = stage_dir / source_script.name
-    if not script.exists():
-        shutil.copy2(source_script, script)
+    shutil.copy2(source_script, script)
     job_file = stage_dir / "JOB_ID"
     if job_file.exists():
         job_id = job_file.read_text(encoding="utf-8").strip()
