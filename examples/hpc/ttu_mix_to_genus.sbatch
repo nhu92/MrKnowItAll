@@ -44,6 +44,7 @@ for path in \
   "$SPROUT_SOURCE/02_exon_trees.py" \
   "$SPROUT_SOURCE/03_distance_matrices.py" \
   "$SPROUT_SOURCE/04_prediction.py" \
+  "$SPROUT_SOURCE/export_pea.py" \
   "$MRKNOWITALL_SOURCE/pyproject.toml"; do
   [[ -e "$path" ]] || { echo "Missing required input: $path" >&2; exit 2; }
 done
@@ -137,6 +138,11 @@ sprout-ref select-candidates \
   --always-top 1 --max-candidates "$MAX_ORDER_CANDIDATES" \
   --output order_candidates.txt --report order_candidate_evidence.csv
 [[ -s order_candidates.txt ]] || { echo "No order candidate survived" >&2; exit 6; }
+python "$SPROUT_SOURCE/export_pea.py" stage \
+  --project "$PROJECT" --level order --predictions order_predictions.csv \
+  --evidence order_candidate_evidence.csv --candidates order_candidates.txt \
+  --gene-list "$query_dir/gene_list.txt" --matrix-dir order_matrix \
+  --z-threshold 0.9 --output order.pea.json --markdown order.report.md
 
 family_dir="$RUN/02_family"
 cd "$family_dir"
@@ -165,6 +171,11 @@ sprout-ref select-candidates \
   --always-top 1 --max-candidates "$MAX_FAMILY_CANDIDATES" \
   --output family_candidates.txt --report family_candidate_evidence.csv
 [[ -s family_candidates.txt ]] || { echo "No family candidate survived" >&2; exit 8; }
+python "$SPROUT_SOURCE/export_pea.py" stage \
+  --project "$PROJECT" --level family --predictions family_predictions.csv \
+  --evidence family_candidate_evidence.csv --candidates family_candidates.txt \
+  --gene-list gene_list.txt --matrix-dir family_matrix \
+  --z-threshold 0 --output family.pea.json --markdown family.report.md
 
 genus_dir="$RUN/03_genus"
 cd "$genus_dir"
@@ -192,6 +203,14 @@ sprout-ref select-candidates \
   --minimum-locus-votes "$MIN_LOCUS_VOTES" --minimum-z 0 \
   --always-top 1 --max-candidates "$MAX_GENUS_CANDIDATES" \
   --output genus_candidates.txt --report genus_candidate_evidence.csv
+python "$SPROUT_SOURCE/export_pea.py" stage \
+  --project "$PROJECT" --level genus --predictions genus_predictions.csv \
+  --evidence genus_candidate_evidence.csv --candidates genus_candidates.txt \
+  --gene-list gene_list.txt --matrix-dir genus_matrix \
+  --z-threshold 0 --output genus.pea.json --markdown genus.report.md
+python "$SPROUT_SOURCE/export_pea.py" merge --project "$PROJECT" \
+  --input "$order_dir/order.pea.json" "$family_dir/family.pea.json" genus.pea.json \
+  --output "$RUN/RESULT.pea.json.gz" --markdown "$RUN/RESULT.md"
 
 cp genus_candidates.txt "$RUN/FINAL_GENUS_CANDIDATES.txt"
 cp genus_candidate_evidence.csv "$RUN/FINAL_GENUS_EVIDENCE.csv"

@@ -26,6 +26,8 @@ The main results are:
 - `FINAL_GENUS_RANKING.csv`
 - `FINAL_GENUS_EVIDENCE.csv`
 - `RUN_SUMMARY.txt`
+- `RESULT.md` (readable ranking, Z values, and evidence counts)
+- `RESULT.pea.json.gz` (small file for [SPrOUT-PEA](https://nhu92.github.io/SPrOUT-PEA/))
 
 Set `SPROUT_SAMPLE_FRACTION=0.04` for a small test or `1.0` for all reads.
 
@@ -73,7 +75,8 @@ python examples/hpc/zaratan_batch_to_genus.py \
   --max-parallel-samples 3 --exclude EMseq001
 ```
 
-Each sample gets `order`, `family`, and `genus` results plus `RESULT.txt`. The summary
+Each sample gets `order`, `family`, and `genus` results plus `RESULT.txt`, `RESULT.md`,
+and `RESULT.pea.json.gz`. The summary
 separately labels the leading genus by per-locus evidence and by SPrOUT's aggregate score;
 they can disagree and neither is a calibrated presence probability. If the planned
 genus pool exceeds 120 Kew recovery files, the controller first screens tree branches

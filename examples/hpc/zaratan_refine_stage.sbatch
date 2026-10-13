@@ -43,7 +43,8 @@ if [[ -n "$ALLOWED_TAXA_FILE" ]]; then
 fi
 
 for path in "$PARENT_FILE" "$QUERY_EXON" "$QUERY_GENE_LIST" "$SPROUT_SOURCE" \
-  "$MRKNOWITALL_SOURCE/pyproject.toml" "$MRKNOWITALL_BACKBONE" "$KEW_CACHE"; do
+  "$SPROUT_SOURCE/export_pea.py" "$MRKNOWITALL_SOURCE/pyproject.toml" \
+  "$MRKNOWITALL_BACKBONE" "$KEW_CACHE"; do
   [[ -e "$path" ]] || { echo "Missing required input: $path" >&2; exit 2; }
 done
 [[ ! -e "$OUTPUT" ]] || { echo "Refusing to overwrite: $OUTPUT" >&2; exit 4; }
@@ -91,9 +92,19 @@ python -m sprout_refbuilder.cli select-candidates \
   --minimum-locus-votes "$MIN_LOCUS_VOTES" --minimum-z 0 \
   --always-top 1 --max-candidates "$MAX_CANDIDATES" \
   --output candidates.txt --report candidate_evidence.csv
+stage_id=$LEVEL
+if [[ -n "$ALLOWED_TAXA_FILE" && "$LEVEL" == genus && "$REPRESENTATIVES" == 1 ]]; then
+  stage_id=branch
+fi
+python "$SPROUT_SOURCE/export_pea.py" stage \
+  --project "$PROJECT" --level "$LEVEL" --stage-id "$stage_id" \
+  --predictions predictions.csv --evidence candidate_evidence.csv \
+  --candidates candidates.txt --gene-list gene_list.txt --matrix-dir matrix \
+  --z-threshold 0 --output stage.pea.json --markdown stage.report.md
 
 mkdir -p "$OUTPUT"
 cp candidates.txt predictions.csv candidate_evidence.csv z_candidates.txt \
+  stage.pea.json stage.report.md \
   "$PROJECT.$LEVEL.cumulative_dist.csv" gene_list.txt "$OUTPUT/"
 cp reference/panel_report.json reference/selection.tsv reference/qc.json "$OUTPUT/"
 cp -a reference/ref "$OUTPUT/reference_ref"

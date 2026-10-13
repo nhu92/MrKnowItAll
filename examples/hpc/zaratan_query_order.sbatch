@@ -33,7 +33,8 @@ MAX_ORDER_CANDIDATES=${SPROUT_MAX_ORDER_CANDIDATES:-8}
 for path in "$READ1" "$READ2" "$TARGET_FILE" "$SOURCE_GENE_LIST" \
   "$ORDER_REFERENCE" "$SPROUT_SOURCE/01_exons_assembly.py" \
   "$SPROUT_SOURCE/02_exon_trees.py" "$SPROUT_SOURCE/03_distance_matrices.py" \
-  "$SPROUT_SOURCE/04_prediction.py" "$MRKNOWITALL_SOURCE/pyproject.toml"; do
+  "$SPROUT_SOURCE/04_prediction.py" "$SPROUT_SOURCE/export_pea.py" \
+  "$MRKNOWITALL_SOURCE/pyproject.toml"; do
   [[ -e "$path" ]] || { echo "Missing input: $path" >&2; exit 2; }
 done
 [[ ! -e "$OUTPUT" ]] || { echo "Refusing to overwrite: $OUTPUT" >&2; exit 4; }
@@ -86,11 +87,17 @@ python -m sprout_refbuilder.cli select-candidates \
   --always-top 1 --max-candidates "$MAX_ORDER_CANDIDATES" \
   --output candidates.txt --report candidate_evidence.csv
 [[ -s candidates.txt ]] || { echo "No order candidate" >&2; exit 6; }
+python "$SPROUT_SOURCE/export_pea.py" stage \
+  --project "$PROJECT" --level order --predictions predictions.csv \
+  --evidence candidate_evidence.csv --candidates candidates.txt \
+  --gene-list "$work/query/gene_list.txt" --matrix-dir matrix \
+  --z-threshold 0.9 --output stage.pea.json --markdown stage.report.md
 
 mkdir -p "$OUTPUT"
 cp -a "$work/query/exon" "$OUTPUT/exon"
 cp "$work/query/gene_list.txt" "$work/query/input_reads.stats.txt" "$OUTPUT/"
 cp candidates.txt predictions.csv candidate_evidence.csv z_candidates.txt \
+  stage.pea.json stage.report.md \
   "$PROJECT.order.cumulative_dist.csv" "$OUTPUT/"
 {
   echo "finished=$(date -Is)"

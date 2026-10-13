@@ -386,6 +386,10 @@ def process_sample(
         f"\ngenus_top_by_sprout_score={top_aggregate_taxon(genus / 'predictions.csv')}\n",
         encoding="utf-8",
     )
+    run_command([
+        sys.executable, str(args.repo / "examples/hpc/export_sample_report.py"),
+        "--sample-dir", str(sample_dir), "--sprout", str(args.sprout),
+    ])
     say(f"{sample}: finished order → family → genus")
     return summary.read_text(encoding="utf-8").strip()
 
