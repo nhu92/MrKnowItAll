@@ -161,7 +161,8 @@ def prefetch(
     report.parent.mkdir(parents=True, exist_ok=True)
     representatives = representatives or (4 if level == "family" else 2)
     command = [
-        "sprout-ref", "--cache", str(cache), "prefetch-kew-panel",
+        sys.executable, "-m", "sprout_refbuilder.cli",
+        "--cache", str(cache), "prefetch-kew-panel",
         "--level", level, "--parent-file", str(parent_file),
         "--backbone", str(backbone), "--report", str(report),
         "--representatives", str(representatives),
@@ -237,7 +238,8 @@ def process_sample(
     if not branch_plan.exists():
         say(f"{sample}/branch: counting Kew genus candidates")
         run_command([
-            "sprout-ref", "--cache", str(args.cache), "plan-genus-branches",
+            sys.executable, "-m", "sprout_refbuilder.cli",
+            "--cache", str(args.cache), "plan-genus-branches",
             "--parent-file", str(family / "candidates.txt"),
             "--backbone", str(args.backbone), "--output", str(branch_plan),
             "--threshold", str(args.branch_threshold),
@@ -276,7 +278,7 @@ def process_sample(
         genus_allowed = branch_dir / "allowed_genera.txt"
         if not genus_allowed.exists():
             run_command([
-                "sprout-ref", "expand-genus-branches",
+                sys.executable, "-m", "sprout_refbuilder.cli", "expand-genus-branches",
                 "--plan", str(branch_plan),
                 "--evidence", str(branch_results / "candidate_evidence.csv"),
                 "--output", str(genus_allowed),
@@ -341,6 +343,9 @@ def main() -> int:
     for path in (args.sample_root, args.repo, args.sprout, args.backbone):
         if not path.exists():
             parser.error(f"Required path does not exist: {path}")
+    os.environ["PYTHONPATH"] = str(args.repo / "src") + os.pathsep + os.environ.get(
+        "PYTHONPATH", ""
+    )
     pairs = sample_pairs(args.sample_root, set(args.sample), set(args.exclude))
     args.run_root.mkdir(parents=True, exist_ok=True)
     args.cache.mkdir(parents=True, exist_ok=True)

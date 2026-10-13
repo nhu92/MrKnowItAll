@@ -44,7 +44,7 @@ mkdir -p "$work/query" "$work/order"
 
 source "$CONDA_SH"
 conda activate "$CONDA_ENV"
-python -m pip install -e "$MRKNOWITALL_SOURCE"
+export PYTHONPATH="$MRKNOWITALL_SOURCE/src${PYTHONPATH:+:$PYTHONPATH}"
 
 fastq_suffix() {
   case "$1" in
@@ -79,7 +79,7 @@ cp "$PROJECT.cumulative_dist.csv" "$PROJECT.order.cumulative_dist.csv"
 python "$SPROUT_SOURCE/04_prediction.py" \
   -i "$PROJECT.order.cumulative_dist.csv" -o predictions.csv \
   -tl o -z 0.9 -to z_candidates.txt
-sprout-ref select-candidates \
+python -m sprout_refbuilder.cli select-candidates \
   --matrix-dir matrix --predictions predictions.csv \
   --level order --project "$PROJECT" \
   --minimum-locus-votes "$MIN_LOCUS_VOTES" --minimum-z 0.9 \

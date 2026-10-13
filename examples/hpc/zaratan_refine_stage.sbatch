@@ -63,10 +63,10 @@ cd "$work"
 
 source "$CONDA_SH"
 conda activate "$CONDA_ENV"
-python -m pip install -e "$MRKNOWITALL_SOURCE"
+export PYTHONPATH="$MRKNOWITALL_SOURCE/src${PYTHONPATH:+:$PYTHONPATH}"
 export SPROUT_REF_OFFLINE=1
 
-sprout-ref --cache "$KEW_CACHE" build-kew-panel \
+python -m sprout_refbuilder.cli --cache "$KEW_CACHE" build-kew-panel \
   --level "$LEVEL" --parent-file parent_candidates.txt \
   --backbone "$MRKNOWITALL_BACKBONE" --output reference \
   "${allowed_args[@]}" \
@@ -85,7 +85,7 @@ cp "$PROJECT.cumulative_dist.csv" "$PROJECT.$LEVEL.cumulative_dist.csv"
 python "$SPROUT_SOURCE/04_prediction.py" \
   -i "$PROJECT.$LEVEL.cumulative_dist.csv" -o predictions.csv \
   -tl "${LEVEL:0:1}" -z 0 -to z_candidates.txt
-sprout-ref select-candidates \
+python -m sprout_refbuilder.cli select-candidates \
   --matrix-dir matrix --predictions predictions.csv \
   --level "$LEVEL" --project "$PROJECT" \
   --minimum-locus-votes "$MIN_LOCUS_VOTES" --minimum-z 0 \
