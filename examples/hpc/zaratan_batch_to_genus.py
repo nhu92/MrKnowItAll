@@ -288,6 +288,70 @@ def process_sample(
             f"{sample}/branch: {expanded['mode']} selected "
             f"{expanded['selected_genera']}/{expanded['total_genera']} genera"
         )
+    if genus_allowed is not None:
+        allowed_count = len(genus_allowed.read_text(encoding="utf-8").splitlines())
+        if allowed_count > args.genus_shard_size:
+            shard_root = sample_dir / "genus_shards"
+            shard_plan = shard_root / "shards.json"
+            if not shard_plan.exists():
+                run_command([
+                    sys.executable, "-m", "sprout_refbuilder.cli", "plan-genus-shards",
+                    "--plan", str(branch_plan),
+                    "--allowed-taxa-file", str(genus_allowed),
+                    "--output-dir", str(shard_root),
+                    "--max-genera-per-shard", str(args.genus_shard_size),
+                ])
+            shard_manifest = json.loads(shard_plan.read_text(encoding="utf-8"))
+            if set(shard_manifest["allowed_genera"]) != set(genus_allowed.read_text().split()):
+                raise RuntimeError(f"{sample}: existing shard plan does not match the genus set")
+            shards = shard_manifest["shards"]
+            say(
+                f"{sample}/genus_shards: {allowed_count} genera in {len(shards)} "
+                "independent Slurm panels"
+            )
+
+            def run_shard(shard: dict) -> None:
+                shard_id = shard["id"]
+                shard_dir = shard_root / shard_id
+                allowed_file = shard_root / f"{shard_id}.txt"
+                prefetch(
+                    f"{sample}/{shard_id}", "genus", family / "candidates.txt",
+                    shard_dir / "prefetch.json", args.cache, args.backbone,
+                    allowed_taxa_file=allowed_file, representatives=1,
+                    pool_multiplier=1,
+                )
+                submit_stage(
+                    f"{sample}/{shard_id}", scripts / "zaratan_refine_stage.sbatch",
+                    shard_dir,
+                    common | {
+                        "SPROUT_LEVEL": "genus",
+                        "SPROUT_PARENT_FILE": str(family / "candidates.txt"),
+                        "SPROUT_QUERY_EXON": str(order / "exon"),
+                        "SPROUT_QUERY_GENE_LIST": str(order / "gene_list.txt"),
+                        "SPROUT_STAGE_OUTPUT": str(shard_dir / "results"),
+                        "SPROUT_ALLOWED_TAXA_FILE": str(allowed_file),
+                        "SPROUT_REF_REPRESENTATIVES": "1",
+                        "SPROUT_REF_POOL_MULTIPLIER": "1",
+                    },
+                    args.shard_memory, args.poll_seconds,
+                )
+
+            with ThreadPoolExecutor(max_workers=args.max_parallel_shards) as executor:
+                futures = [executor.submit(run_shard, shard) for shard in shards]
+                for future in as_completed(futures):
+                    future.result()
+            shortlist = shard_root / "shortlist.txt"
+            if not shortlist.exists():
+                run_command([
+                    sys.executable, "-m", "sprout_refbuilder.cli",
+                    "shortlist-genus-shards", "--plan", str(shard_plan),
+                    "--shard-runs", str(shard_root), "--output", str(shortlist),
+                    "--report", str(shard_root / "shortlist.json"),
+                    "--max-final-genera", str(args.max_final_genera),
+                ])
+            shortlisted = len(shortlist.read_text(encoding="utf-8").splitlines())
+            say(f"{sample}/genus_shards: {shortlisted} genera retained for joint validation")
+            genus_allowed = shortlist
     genus_dir = sample_dir / "genus"
     prefetch(
         f"{sample}/genus", "genus", family / "candidates.txt",
@@ -331,14 +395,21 @@ def main() -> int:
     parser.add_argument("--poll-seconds", type=int, default=30)
     parser.add_argument("--order-memory", default="96G")
     parser.add_argument("--refine-memory", default="192G")
+    parser.add_argument("--shard-memory", default="96G")
+    parser.add_argument("--genus-shard-size", type=int, default=40)
+    parser.add_argument("--max-parallel-shards", type=int, default=2)
+    parser.add_argument("--max-final-genera", type=int, default=80)
     parser.add_argument(
         "--branch-threshold", type=int, default=120,
         help="Screen Kew tree branches when the genus pool exceeds this many recovery FASTAs",
     )
     parser.add_argument("--conda-env", default="sprout")
     args = parser.parse_args()
-    if args.max_parallel_samples < 1 or args.poll_seconds < 1 or args.branch_threshold < 1:
-        parser.error("Parallel sample count and poll interval must be positive")
+    if min(
+        args.max_parallel_samples, args.max_parallel_shards, args.poll_seconds,
+        args.branch_threshold, args.genus_shard_size, args.max_final_genera,
+    ) < 1:
+        parser.error("Parallel counts, limits, and poll interval must be positive")
     for path in (args.sample_root, args.repo, args.sprout, args.backbone):
         if not path.exists():
             parser.error(f"Required path does not exist: {path}")

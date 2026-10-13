@@ -48,6 +48,13 @@ narrows the final genus panel to supported branches and their nearest neighbors.
 evidence is spread across many branches, it uses the whole family instead. This screen is
 an efficiency heuristic, not proof that excluded genera are absent.
 
+If more than 40 genera remain, they are split into tree-guided groups. Separate Slurm jobs
+test those groups, with at most two running per sample by default. Each group contributes
+its best-supported genera to a shortlist of at most 80. One final, smaller joint panel
+compares the shortlisted genera directly. Raw scores from separate groups are **not**
+compared as if they came from one alignment. The group limit and final shortlist limit
+can be changed in the HPC controller.
+
 ## Mixed-sample candidate selection
 
 A strong component can make a weaker component's global z-score look small. MrKnowItAll combines:

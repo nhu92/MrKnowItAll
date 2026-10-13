@@ -78,3 +78,8 @@ genus pool exceeds 120 Kew recovery files, the controller first screens tree bra
 using a small anchor panel. It keeps supported branches and their neighbors; unclear
 screens fall back to the full family. A clearly dominant anchor can narrow weak secondary
 calls using both its score and locus votes. Change the trigger with `--branch-threshold`.
+If more than 40 genera remain after screening, the controller divides them into Kew-tree
+shards and runs separate Slurm panels (two at a time per sample). It keeps an equal
+within-shard quota for a final joint panel of at most 80 genera. This avoids treating
+scores from different alignments as directly comparable. Configure this with
+`--genus-shard-size`, `--max-parallel-shards`, and `--max-final-genera`.

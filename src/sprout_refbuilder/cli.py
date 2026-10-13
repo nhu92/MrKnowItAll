@@ -15,6 +15,7 @@ from .kew import DEFAULT_BASE_URL, KewClient
 from .ml import train_anomaly_model
 from .models import Taxonomy
 from .panel import HierarchicalPanelBuilder, run_mix7_demo
+from .shards import plan_genus_shards, shortlist_genus_shards
 
 
 def _cache(value: str | None) -> Path:
@@ -155,6 +156,23 @@ def parser() -> argparse.ArgumentParser:
     branch_expand.add_argument("--output", required=True, type=Path)
     branch_expand.add_argument("--report", required=True, type=Path)
 
+    shard_plan = commands.add_parser(
+        "plan-genus-shards", help="Split a large genus set along Kew tree branches"
+    )
+    shard_plan.add_argument("--plan", required=True, type=Path)
+    shard_plan.add_argument("--allowed-taxa-file", required=True, type=Path)
+    shard_plan.add_argument("--output-dir", required=True, type=Path)
+    shard_plan.add_argument("--max-genera-per-shard", type=int, default=40)
+
+    shard_shortlist = commands.add_parser(
+        "shortlist-genus-shards", help="Combine within-shard candidates for one small joint panel"
+    )
+    shard_shortlist.add_argument("--plan", required=True, type=Path)
+    shard_shortlist.add_argument("--shard-runs", required=True, type=Path)
+    shard_shortlist.add_argument("--output", required=True, type=Path)
+    shard_shortlist.add_argument("--report", required=True, type=Path)
+    shard_shortlist.add_argument("--max-final-genera", type=int, default=80)
+
     candidates = commands.add_parser(
         "select-candidates",
         help="Combine aggregate scores with per-query nearest-reference locus votes",
@@ -242,6 +260,18 @@ def main(argv: list[str] | None = None) -> int:
                 indent=2,
             )
         )
+        return 0
+    if args.command == "plan-genus-shards":
+        print(json.dumps(plan_genus_shards(
+            args.plan, args.allowed_taxa_file, args.output_dir,
+            max_genera_per_shard=args.max_genera_per_shard,
+        ), indent=2))
+        return 0
+    if args.command == "shortlist-genus-shards":
+        print(json.dumps(shortlist_genus_shards(
+            args.plan, args.shard_runs, args.output, args.report,
+            max_final_genera=args.max_final_genera,
+        ), indent=2))
         return 0
     if args.command == "web":
         import uvicorn
