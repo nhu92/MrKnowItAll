@@ -87,10 +87,15 @@ python -m sprout_refbuilder.cli select-candidates \
   --always-top 1 --max-candidates "$MAX_ORDER_CANDIDATES" \
   --output candidates.txt --report candidate_evidence.csv
 [[ -s candidates.txt ]] || { echo "No order candidate" >&2; exit 6; }
+context_args=()
+if [[ -f "${SPROUT_REF_CACHE:-}/treeoflife.current.tree" ]]; then
+  context_args=(--context-tree "$SPROUT_REF_CACHE/treeoflife.current.tree")
+fi
 python "$SPROUT_SOURCE/export_pea.py" stage \
   --project "$PROJECT" --level order --predictions predictions.csv \
   --evidence candidate_evidence.csv --candidates candidates.txt \
-  --gene-list "$work/query/gene_list.txt" --matrix-dir matrix \
+  --gene-list "$work/query/gene_list.txt" --matrix-dir matrix --phylo-dir phylo \
+  "${context_args[@]}" \
   --z-threshold 0.9 --output stage.pea.json --markdown stage.report.md
 
 mkdir -p "$OUTPUT"

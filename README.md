@@ -87,13 +87,13 @@ FINAL_GENUS_RANKING.csv      complete SPrOUT genus ranking
 FINAL_GENUS_EVIDENCE.csv     locus votes and scores
 RUN_SUMMARY.txt              simple run summary
 RESULT.md                    readable order-to-genus report (Z, votes, warnings)
-RESULT.pea.json.gz           small report for SPrOUT-PEA (no raw reads)
+RESULT.pea.json.gz           small report for SPrOUT-PEA (pruned exon/context trees; no raw reads)
 ```
 
 Intermediate order, family, reference, tree, and QC files remain in the run directory.
 Open `RESULT.pea.json.gz` in [SPrOUT-PEA](https://nhu92.github.io/SPrOUT-PEA/) to explore
-the ranking and individual genes. New HPC runs preserve the nearest-reference evidence for
-each gene in a small stage report before temporary matrices disappear. For older completed
+the ranking, individual exon trees, and length-aware support. New HPC runs preserve compact
+pruned trees and nearest-reference evidence before temporary matrices disappear. For older completed
 Zaratan runs, use `examples/hpc/export_sample_report.py --sample-dir /path/to/EMseq003
 --sprout /path/to/SPrOUT`; rankings will be available, but the app will mark missing
 per-gene evidence clearly.

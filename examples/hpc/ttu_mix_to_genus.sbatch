@@ -33,6 +33,11 @@ MAX_ORDER_CANDIDATES=${SPROUT_MAX_ORDER_CANDIDATES:-8}
 MAX_FAMILY_CANDIDATES=${SPROUT_MAX_FAMILY_CANDIDATES:-12}
 MAX_GENUS_CANDIDATES=${SPROUT_MAX_GENUS_CANDIDATES:-20}
 RUN=${SPROUT_RUN_DIR:-$PWD}
+context_args=()
+if [[ -n "${SPROUT_CONTEXT_TREE:-}" ]]; then
+  [[ -s "$SPROUT_CONTEXT_TREE" ]] || { echo "Missing SPROUT_CONTEXT_TREE" >&2; exit 2; }
+  context_args=(--context-tree "$SPROUT_CONTEXT_TREE")
+fi
 
 [[ "$PROJECT" =~ ^[A-Za-z0-9_.-]+$ ]] || {
   echo "SPROUT_PROJECT may contain only letters, digits, dot, underscore and hyphen" >&2
@@ -141,7 +146,8 @@ sprout-ref select-candidates \
 python "$SPROUT_SOURCE/export_pea.py" stage \
   --project "$PROJECT" --level order --predictions order_predictions.csv \
   --evidence order_candidate_evidence.csv --candidates order_candidates.txt \
-  --gene-list "$query_dir/gene_list.txt" --matrix-dir order_matrix \
+  --gene-list "$query_dir/gene_list.txt" --matrix-dir order_matrix --phylo-dir order_phylo \
+  "${context_args[@]}" \
   --z-threshold 0.9 --output order.pea.json --markdown order.report.md
 
 family_dir="$RUN/02_family"
@@ -174,7 +180,8 @@ sprout-ref select-candidates \
 python "$SPROUT_SOURCE/export_pea.py" stage \
   --project "$PROJECT" --level family --predictions family_predictions.csv \
   --evidence family_candidate_evidence.csv --candidates family_candidates.txt \
-  --gene-list gene_list.txt --matrix-dir family_matrix \
+  --gene-list gene_list.txt --matrix-dir family_matrix --phylo-dir family_phylo \
+  "${context_args[@]}" \
   --z-threshold 0 --output family.pea.json --markdown family.report.md
 
 genus_dir="$RUN/03_genus"
@@ -206,7 +213,8 @@ sprout-ref select-candidates \
 python "$SPROUT_SOURCE/export_pea.py" stage \
   --project "$PROJECT" --level genus --predictions genus_predictions.csv \
   --evidence genus_candidate_evidence.csv --candidates genus_candidates.txt \
-  --gene-list gene_list.txt --matrix-dir genus_matrix \
+  --gene-list gene_list.txt --matrix-dir genus_matrix --phylo-dir genus_phylo \
+  "${context_args[@]}" \
   --z-threshold 0 --output genus.pea.json --markdown genus.report.md
 python "$SPROUT_SOURCE/export_pea.py" merge --project "$PROJECT" \
   --input "$order_dir/order.pea.json" "$family_dir/family.pea.json" genus.pea.json \

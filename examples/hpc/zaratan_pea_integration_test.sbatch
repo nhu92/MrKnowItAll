@@ -15,10 +15,11 @@ set -Eeuo pipefail
 SPROUT_SOURCE=${SPROUT_SOURCE:?Set SPROUT_SOURCE}
 QUERY_EXON=${QUERY_EXON:?Set QUERY_EXON}
 QUERY_GENE_LIST=${QUERY_GENE_LIST:?Set QUERY_GENE_LIST}
+CONTEXT_TREE=${CONTEXT_TREE:?Set CONTEXT_TREE to the cached Kew species tree}
 REPORT_DIR=${REPORT_DIR:?Set REPORT_DIR to a new directory}
 PROJECT=${SPROUT_PROJECT:-emseq003}
 [[ ! -e "$REPORT_DIR" ]] || { echo "Refusing to overwrite $REPORT_DIR" >&2; exit 4; }
-for path in "$SPROUT_SOURCE/export_pea.py" "$QUERY_EXON" "$QUERY_GENE_LIST"; do
+for path in "$SPROUT_SOURCE/export_pea.py" "$SPROUT_SOURCE/pea_trees.py" "$QUERY_EXON" "$QUERY_GENE_LIST" "$CONTEXT_TREE"; do
   [[ -e "$path" ]] || { echo "Missing $path" >&2; exit 2; }
 done
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
@@ -35,7 +36,8 @@ python "$SPROUT_SOURCE/04_prediction.py" -i "$PROJECT.cumulative_dist.csv" \
   -o predictions.csv -tl o -z 0.9 -to candidates.txt
 python "$SPROUT_SOURCE/export_pea.py" stage --project "$PROJECT" --level order \
   --predictions predictions.csv --candidates candidates.txt \
-  --gene-list "$QUERY_GENE_LIST" --matrix-dir matrix --z-threshold 0.9 \
+  --gene-list "$QUERY_GENE_LIST" --matrix-dir matrix --phylo-dir phylo \
+  --context-tree "$CONTEXT_TREE" --z-threshold 0.9 \
   --output "$PROJECT.pea.json.gz" --markdown "$PROJECT.report.md"
 python - "$PROJECT.pea.json.gz" <<'PY'
 import gzip, json, sys
@@ -44,7 +46,11 @@ with gzip.open(sys.argv[1], 'rt', encoding='utf-8') as handle:
 stage = report['stages'][0]
 assert stage['evidence_available'] and stage['genes'], 'Missing real per-gene evidence'
 assert stage['counts']['query_exons'] > 0, 'No matched query exons'
-print('INTEGRATION_OK', report['sample_id'], len(stage['genes']), stage['counts'])
+assert stage['summary_tree']['tree'], 'Missing Kew context tree'
+assert any(gene.get('exons') for gene in stage['genes']), 'Missing pruned exon trees'
+assert stage['weighted_support'], 'Missing length-aware contributions'
+print('INTEGRATION_OK', report['sample_id'], len(stage['genes']), stage['counts'],
+      'exon_trees', sum(len(gene.get('exons', [])) for gene in stage['genes']))
 PY
 mkdir "$REPORT_DIR"
 cp "$PROJECT.pea.json.gz" "$PROJECT.report.md" "$REPORT_DIR/"

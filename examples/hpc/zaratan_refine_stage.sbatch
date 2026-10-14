@@ -99,7 +99,8 @@ fi
 python "$SPROUT_SOURCE/export_pea.py" stage \
   --project "$PROJECT" --level "$LEVEL" --stage-id "$stage_id" \
   --predictions predictions.csv --evidence candidate_evidence.csv \
-  --candidates candidates.txt --gene-list gene_list.txt --matrix-dir matrix \
+  --candidates candidates.txt --gene-list gene_list.txt --matrix-dir matrix --phylo-dir phylo \
+  --context-tree "$KEW_CACHE/treeoflife.current.tree" \
   --z-threshold 0 --output stage.pea.json --markdown stage.report.md
 
 mkdir -p "$OUTPUT"
