@@ -17,8 +17,8 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 

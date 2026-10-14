@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Combine one MrKnowItAll sample into a readable and web-ready SPrOUT report.
 
 New HPC stages already contain per-gene evidence. Completed older stages can be
