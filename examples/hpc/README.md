@@ -1,6 +1,8 @@
 # HPC examples
 
 These Slurm scripts run MrKnowItAll with SPrOUT on a computing cluster.
+See [the 11-mixture Zaratan example](../../example_run.md) for the complete
+submission command, parameter values, job IDs, and output checks.
 
 ## Mixed reads to genus
 
@@ -33,12 +35,19 @@ Set `SPROUT_SAMPLE_FRACTION=0.04` for a small test or `1.0` for all reads.
 
 ## Prepare the 353-gene backbone
 
-The alignment ZIP is too large for GitHub. On TTU, copy `ttu_prepare_backbone.sbatch` into a
-new run directory and submit it:
+The original alignment ZIP is a
+[GitHub Release asset](https://github.com/nhu92/MrKnowItAll/releases/tag/backbone-source-2026-10-14),
+not a tracked Git file. On TTU, download and verify it, then copy
+`ttu_prepare_backbone.sbatch` into a new run directory and submit it. The
+archive must be directly under `MRKNOWITALL_ARCHIVE_DIR`:
 
 ```bash
+archive_dir=/lustre/scratch/nhu/202609/871ref
+cd "$archive_dir"
+curl -fL -O https://github.com/nhu92/MrKnowItAll/releases/download/backbone-source-2026-10-14/angiosperms_353_v2_interim_targetfile_gene_alignments.zip
+echo '42b0c210961c13376c8e01f8a2673148cd4f6a330e5b7b2deca6ae51d3819931  angiosperms_353_v2_interim_targetfile_gene_alignments.zip' | sha256sum -c -
 mkdir -p prepare_backbone_run/logs
-cp ttu_prepare_backbone.sbatch prepare_backbone_run/
+cp MrKnowItAll/examples/hpc/ttu_prepare_backbone.sbatch prepare_backbone_run/
 cd prepare_backbone_run
 sbatch ttu_prepare_backbone.sbatch
 ```

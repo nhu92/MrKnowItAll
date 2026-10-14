@@ -44,17 +44,24 @@ fastp, BWA, trimAl, FastTree, and SeqKit.
 
 ## Prepare the backbone
 
-The large alignment backbone is not stored in GitHub. Install it from the original ZIP:
+Download the original 353-gene alignment ZIP from the
+[backbone-source release](https://github.com/nhu92/MrKnowItAll/releases/tag/backbone-source-2026-10-14),
+verify its SHA-256, then install the corrected backbone:
 
 ```bash
+curl -fL -O https://github.com/nhu92/MrKnowItAll/releases/download/backbone-source-2026-10-14/angiosperms_353_v2_interim_targetfile_gene_alignments.zip
+echo '42b0c210961c13376c8e01f8a2673148cd4f6a330e5b7b2deca6ae51d3819931  angiosperms_353_v2_interim_targetfile_gene_alignments.zip' | sha256sum -c -
 sprout-ref install-backbone \
-  --archive /path/to/angiosperms_353_gene_alignments.zip \
+  --archive angiosperms_353_v2_interim_targetfile_gene_alignments.zip \
   --destination data/backbone
 ```
 
 The installer checks all 353 alignments and applies the included taxonomy corrections.
 
 ## Run a mixed sample to genus
+
+For a real 11-sample Zaratan run, including Slurm job IDs, effective limits,
+recovery steps, and an input-availability audit, see [example_run.md](example_run.md).
 
 The easiest HPC entry point is:
 
