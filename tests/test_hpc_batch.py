@@ -32,6 +32,29 @@ def test_helper_commands_limit_blas_threads(monkeypatch):
     assert all(seen[name] == "1" for name in batch.NUMERIC_THREAD_VARIABLES)
 
 
+def test_queue_stage_submits_without_waiting(tmp_path, monkeypatch):
+    source = tmp_path / "stage.sbatch"
+    source.write_text("#!/bin/bash\n", encoding="utf-8")
+    stage_dir = tmp_path / "stage"
+    monkeypatch.setattr(batch, "run_command", lambda *args, **kwargs: "12345")
+    monkeypatch.setattr(
+        batch, "wait_for_stage",
+        lambda *args: pytest.fail("order prefill must not wait for Slurm"),
+    )
+    assert batch.queue_stage("sample/order", source, stage_dir, {}, "1G") == (
+        stage_dir / "results", "12345"
+    )
+    assert (stage_dir / "JOB_ID").read_text(encoding="utf-8") == "12345\n"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="fcntl locking is used on Zaratan")
+def test_second_controller_is_rejected(tmp_path):
+    with batch.controller_lock(tmp_path):
+        with pytest.raises(RuntimeError, match="Another controller"):
+            with batch.controller_lock(tmp_path):
+                pass
+
+
 @pytest.mark.skipif(os.name != "posix", reason="fcntl locking is used on Zaratan")
 def test_concurrent_controllers_submit_stage_only_once(tmp_path, monkeypatch):
     source = tmp_path / "stage.sbatch"

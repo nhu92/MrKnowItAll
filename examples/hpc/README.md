@@ -62,6 +62,15 @@ Zaratan compute nodes cannot reach Kew. The batch controller downloads Kew recov
 the login node and submits each analysis stage to Slurm. It can run several samples at once
 and resumes stages that already succeeded or have a recorded Slurm job ID.
 
+To put every independent order analysis in the Slurm queue immediately, add
+`--submit-orders-only` and select samples with repeated `--sample` options (or
+omit them to select every sample). Run the normal controller afterward; it will
+reuse those order job IDs. Family and genus jobs cannot be queued until the
+preceding stage identifies candidate taxa and the Kew sequences have been cached.
+`--max-parallel-samples` limits active sample pipelines, not pre-submitted order jobs.
+Only one full controller should use a run directory at a time; newer controllers
+enforce this with a shared lock across Zaratan login nodes.
+
 ```bash
 source "$HOME/miniconda3/etc/profile.d/conda.sh"
 conda activate sprout

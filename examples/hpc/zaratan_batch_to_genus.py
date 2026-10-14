@@ -137,20 +137,39 @@ def submission_lock(stage_dir: Path):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def submit_stage(
+@contextmanager
+def controller_lock(run_root: Path):
+    """Allow only one full pipeline controller per shared run directory."""
+    with (run_root / ".controller.lock").open("a+", encoding="utf-8") as handle:
+        if os.name == "posix":
+            import fcntl
+
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise RuntimeError(
+                    f"Another controller is already running for {run_root}"
+                ) from exc
+        try:
+            yield
+        finally:
+            if os.name == "posix":
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def queue_stage(
     stage: str,
     source_script: Path,
     stage_dir: Path,
     environment: dict[str, str],
     memory: str,
-    poll_seconds: int,
-) -> Path:
+) -> tuple[Path, str | None]:
     result_dir = stage_dir / "results"
     stage_dir.mkdir(parents=True, exist_ok=True)
     with submission_lock(stage_dir):
         if (result_dir / "SUCCESS").exists():
             say(f"{stage}: reusing completed result")
-            return result_dir
+            return result_dir, None
         (stage_dir / "logs").mkdir(exist_ok=True)
         script = stage_dir / source_script.name
         shutil.copy2(source_script, script)
@@ -174,6 +193,22 @@ def submit_stage(
                 raise RuntimeError(f"Unexpected sbatch response: {job_id}")
             job_file.write_text(job_id + "\n", encoding="utf-8")
             say(f"{stage}: submitted job {job_id}")
+    return result_dir, job_id
+
+
+def submit_stage(
+    stage: str,
+    source_script: Path,
+    stage_dir: Path,
+    environment: dict[str, str],
+    memory: str,
+    poll_seconds: int,
+) -> Path:
+    result_dir, job_id = queue_stage(
+        stage, source_script, stage_dir, environment, memory
+    )
+    if job_id is None:
+        return result_dir
     wait_for_stage(stage, job_id, result_dir, poll_seconds)
     return result_dir
 
@@ -223,6 +258,17 @@ def prefetch(
         )
 
 
+def common_environment(args: argparse.Namespace, project: str) -> dict[str, str]:
+    return {
+        "SPROUT_PROJECT": project,
+        "SPROUT_SOURCE": str(args.sprout),
+        "MRKNOWITALL_SOURCE": str(args.repo),
+        "MRKNOWITALL_BACKBONE": str(args.backbone),
+        "SPROUT_REF_CACHE": str(args.cache),
+        "SPROUT_CONDA_ENV": args.conda_env,
+    }
+
+
 def process_sample(
     sample: str,
     reads: tuple[Path, Path],
@@ -231,14 +277,7 @@ def process_sample(
     sample_dir = args.run_root / sample
     sample_dir.mkdir(parents=True, exist_ok=True)
     project = sample.lower()
-    common = {
-        "SPROUT_PROJECT": project,
-        "SPROUT_SOURCE": str(args.sprout),
-        "MRKNOWITALL_SOURCE": str(args.repo),
-        "MRKNOWITALL_BACKBONE": str(args.backbone),
-        "SPROUT_REF_CACHE": str(args.cache),
-        "SPROUT_CONDA_ENV": args.conda_env,
-    }
+    common = common_environment(args, project)
     scripts = args.repo / "examples" / "hpc"
     order_dir = sample_dir / "order"
     order = submit_stage(
@@ -433,6 +472,10 @@ def main() -> int:
     parser.add_argument("--cache", required=True, type=Path)
     parser.add_argument("--sample", action="append", default=[])
     parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument(
+        "--submit-orders-only", action="store_true",
+        help="Queue every selected sample's independent order job, then exit",
+    )
     parser.add_argument("--max-parallel-samples", type=int, default=3)
     parser.add_argument("--poll-seconds", type=int, default=30)
     parser.add_argument("--order-memory", default="96G")
@@ -461,25 +504,42 @@ def main() -> int:
     pairs = sample_pairs(args.sample_root, set(args.sample), set(args.exclude))
     args.run_root.mkdir(parents=True, exist_ok=True)
     args.cache.mkdir(parents=True, exist_ok=True)
-    say(f"Starting {len(pairs)} samples with {args.max_parallel_samples} concurrent pipelines")
-    failed = []
-    with ThreadPoolExecutor(max_workers=args.max_parallel_samples) as executor:
-        futures = {
-            executor.submit(process_sample, sample, reads, args): sample
-            for sample, reads in pairs.items()
-        }
-        for future in as_completed(futures):
-            sample = futures[future]
-            try:
-                say(future.result())
-            except (OSError, RuntimeError, ValueError) as exc:
-                failed.append(sample)
-                say(f"{sample}: FAILED: {exc}")
-    if failed:
-        say(f"Failed samples: {', '.join(sorted(failed))}")
-        return 1
-    say("All selected samples reached genus")
-    return 0
+    if args.submit_orders_only:
+        for sample, reads in pairs.items():
+            order_dir = args.run_root / sample / "order"
+            queue_stage(
+                f"{sample}/order",
+                args.repo / "examples/hpc/zaratan_query_order.sbatch",
+                order_dir,
+                common_environment(args, sample.lower()) | {
+                    "SPROUT_READ1": str(reads[0]),
+                    "SPROUT_READ2": str(reads[1]),
+                    "SPROUT_STAGE_OUTPUT": str(order_dir / "results"),
+                },
+                args.order_memory,
+            )
+        say(f"Queued or reused order stages for {len(pairs)} samples")
+        return 0
+    with controller_lock(args.run_root):
+        say(f"Starting {len(pairs)} samples with {args.max_parallel_samples} concurrent pipelines")
+        failed = []
+        with ThreadPoolExecutor(max_workers=args.max_parallel_samples) as executor:
+            futures = {
+                executor.submit(process_sample, sample, reads, args): sample
+                for sample, reads in pairs.items()
+            }
+            for future in as_completed(futures):
+                sample = futures[future]
+                try:
+                    say(future.result())
+                except (OSError, RuntimeError, ValueError) as exc:
+                    failed.append(sample)
+                    say(f"{sample}: FAILED: {exc}")
+        if failed:
+            say(f"Failed samples: {', '.join(sorted(failed))}")
+            return 1
+        say("All selected samples reached genus")
+        return 0
 
 
 if __name__ == "__main__":
