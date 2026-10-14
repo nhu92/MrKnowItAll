@@ -87,13 +87,16 @@ python examples/hpc/zaratan_batch_to_genus.py \
 Each sample gets `order`, `family`, and `genus` results plus `RESULT.txt`, `RESULT.md`,
 and `RESULT.pea.json.gz`. The summary
 separately labels the leading genus by per-locus evidence and by SPrOUT's aggregate score;
-they can disagree and neither is a calibrated presence probability. If the planned
-genus pool exceeds 120 Kew recovery files, the controller first screens tree branches
-using a small anchor panel. It keeps supported branches and their neighbors; unclear
-screens fall back to the full family. A clearly dominant anchor can narrow weak secondary
-calls using both its score and locus votes. Change the trigger with `--branch-threshold`.
-If more than 40 genera remain after screening, the controller divides them into Kew-tree
-shards and runs separate Slurm panels (two at a time per sample). It keeps an equal
-within-shard quota for a final joint panel of at most 80 genera. This avoids treating
-scores from different alignments as directly comparable. Configure this with
-`--genus-shard-size`, `--max-parallel-shards`, and `--max-final-genera`.
+they can disagree and neither is a calibrated presence probability. If more than 80 genera
+are eligible, the controller screens the Kew species tree in successive rounds. Each
+candidate family is divided into a few broad branches; a small anchor panel tests those
+branches, and only supported branches and close neighbors enter the next round. The
+default limit is five rounds (`--max-branch-rounds`). This is a coarse-to-fine search,
+not a partition of every genus into jobs. The old full-family fallback is disabled.
+If 81–160 genera remain, small Slurm panels shortlist them for a final joint panel of
+at most 80 genera. Above 160, the sample is explicitly reported as unresolved instead
+of launching a huge alignment. Configure the limits with `--genus-shard-size`,
+`--max-parallel-shards`, `--max-final-genera`, and `--max-postscreen-genera`.
+Anchor screens appear under `branch/round_XX/`.
+Use a new `--run-root` when upgrading a sample that already has a legacy
+`branch/plan.json`; the controller refuses to mix old and new genus screens.

@@ -42,18 +42,17 @@ order → family → genus
 Each family or genus receives the same requested number of reference samples. This makes the
 SPrOUT scores easier to compare.
 
-If a family contains more than 120 planned Kew samples, the program first tests a small
-set of genera representing branches in Kew's species tree. Strong, concentrated evidence
-narrows the final genus panel to supported branches and their nearest neighbors. If the
-evidence is spread across many branches, it uses the whole family instead. This screen is
-an efficiency heuristic, not proof that excluded genera are absent.
+For a large genus pool, the program cuts each candidate family into a few broad branches
+of Kew's species tree. It tests one or two representative genera from each branch, keeps
+the strongest supported branches plus close neighbors, and repeats within those branches.
+Each round therefore searches a smaller part of the tree; it does **not** simply run every
+genus in separate jobs. Several branches can be kept because a sample can be a mixture.
 
-If more than 40 genera remain, they are split into tree-guided groups. Separate Slurm jobs
-test those groups, with at most two running per sample by default. Each group contributes
-its best-supported genera to a shortlist of at most 80. One final, smaller joint panel
-compares the shortlisted genera directly. Raw scores from separate groups are **not**
-compared as if they came from one alignment. The group limit and final shortlist limit
-can be changed in the HPC controller.
+The default final panel has at most 80 genera. If tree screening leaves 81–160 genera,
+small parallel panels shortlist them before one joint comparison. More than 160 remaining
+genera are reported as **unresolved overflow**; the pipeline does not silently fall back
+to aligning the entire family. These are screening heuristics, not proof that excluded
+genera are absent. Raw scores from different panels are not directly compared.
 
 ## Mixed-sample candidate selection
 

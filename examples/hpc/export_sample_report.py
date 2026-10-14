@@ -19,13 +19,20 @@ def export_sample(sample_dir: Path, sprout: Path) -> tuple[Path, Path]:
         raise FileNotFoundError(f"SPrOUT exporter not found: {exporter}")
     project = sample_dir.name.lower()
     stage_files = []
-    for stage_id, level, z in (
-        ("order", "order", 0.9),
-        ("family", "family", 0.0),
-        ("branch", "genus", 0.0),
-        ("genus", "genus", 0.0),
-    ):
-        results = sample_dir / stage_id / "results"
+    stages = [
+        ("order", "order", 0.9, sample_dir / "order" / "results"),
+        ("family", "family", 0.0, sample_dir / "family" / "results"),
+    ]
+    stages.extend(
+        (f"branch_{round_dir.name}", "genus", 0.0, round_dir / "results")
+        for round_dir in sorted((sample_dir / "branch").glob("round_*"))
+        if round_dir.is_dir()
+    )
+    stages.extend([
+        ("branch", "genus", 0.0, sample_dir / "branch" / "results"),
+        ("genus", "genus", 0.0, sample_dir / "genus" / "results"),
+    ])
+    for stage_id, level, z, results in stages:
         if not (results / "SUCCESS").is_file():
             continue
         stage_file = results / "stage.pea.json"

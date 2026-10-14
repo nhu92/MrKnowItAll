@@ -276,6 +276,11 @@ def process_sample(
 ) -> str:
     sample_dir = args.run_root / sample
     sample_dir.mkdir(parents=True, exist_ok=True)
+    if (sample_dir / "branch" / "plan.json").exists():
+        raise RuntimeError(
+            f"{sample}: this run root uses the earlier single-pass branch format; "
+            "choose a fresh run root for progressive screening"
+        )
     project = sample.lower()
     common = common_environment(args, project)
     scripts = args.repo / "examples" / "hpc"
@@ -305,37 +310,49 @@ def process_sample(
         },
         args.refine_memory, args.poll_seconds,
     )
-    branch_dir = sample_dir / "branch"
-    branch_dir.mkdir(exist_ok=True)
-    branch_plan = branch_dir / "plan.json"
-    if not branch_plan.exists():
-        say(f"{sample}/branch: counting Kew genus candidates")
-        run_command([
-            sys.executable, "-m", "sprout_refbuilder.cli",
-            "--cache", str(args.cache), "plan-genus-branches",
-            "--parent-file", str(family / "candidates.txt"),
-            "--backbone", str(args.backbone), "--output", str(branch_plan),
-            "--threshold", str(args.branch_threshold),
-        ])
-    plan = json.loads(branch_plan.read_text(encoding="utf-8"))
-    say(
-        f"{sample}/branch: {plan['pool_records']} planned Kew recoveries; "
-        f"screening {'enabled' if plan['triggered'] else 'skipped'}"
-    )
+    branch_root = sample_dir / "branch"
+    branch_root.mkdir(exist_ok=True)
     genus_allowed: Path | None = None
-    if plan["triggered"]:
+    branch_plan: Path | None = None
+    plan: dict = {}
+    for round_number in range(1, args.max_branch_rounds + 1):
+        branch_dir = branch_root / f"round_{round_number:02d}"
+        branch_dir.mkdir(exist_ok=True)
+        branch_plan = branch_dir / "plan.json"
+        if not branch_plan.exists():
+            command = [
+                sys.executable, "-m", "sprout_refbuilder.cli",
+                "--cache", str(args.cache), "plan-genus-branches",
+                "--parent-file", str(family / "candidates.txt"),
+                "--backbone", str(args.backbone), "--output", str(branch_plan),
+                "--threshold", str(min(args.branch_threshold, args.max_final_genera)),
+                "--max-group-genera", str(args.genus_shard_size),
+            ]
+            if genus_allowed is not None:
+                command.extend(["--allowed-genera-file", str(genus_allowed)])
+            run_command(command)
+        plan = json.loads(branch_plan.read_text(encoding="utf-8"))
+        source_count = len(plan["all_genera"])
+        say(
+            f"{sample}/branch round {round_number}: {source_count} genera; "
+            f"screening {'enabled' if plan['triggered'] else 'not needed'}"
+        )
+        if source_count <= args.max_final_genera or not plan["triggered"]:
+            break
         anchor_file = branch_dir / "anchors.txt"
         anchor_file.write_text(
             "".join(f"{name}\n" for name in plan["anchor_genera"]),
             encoding="utf-8",
         )
         prefetch(
-            f"{sample}/branch", "genus", family / "candidates.txt",
-            branch_dir / "prefetch.json", args.cache, args.backbone,
-            allowed_taxa_file=anchor_file, representatives=1, pool_multiplier=1,
+            f"{sample}/branch round {round_number}", "genus",
+            family / "candidates.txt", branch_dir / "prefetch.json",
+            args.cache, args.backbone, allowed_taxa_file=anchor_file,
+            representatives=1, pool_multiplier=1,
         )
         branch_results = submit_stage(
-            f"{sample}/branch", scripts / "zaratan_refine_stage.sbatch", branch_dir,
+            f"{sample}/branch round {round_number}",
+            scripts / "zaratan_refine_stage.sbatch", branch_dir,
             common | {
                 "SPROUT_LEVEL": "genus",
                 "SPROUT_PARENT_FILE": str(family / "candidates.txt"),
@@ -348,26 +365,68 @@ def process_sample(
             },
             args.refine_memory, args.poll_seconds,
         )
-        genus_allowed = branch_dir / "allowed_genera.txt"
-        if not genus_allowed.exists():
+        next_allowed = branch_dir / "allowed_genera.txt"
+        if not next_allowed.exists():
             run_command([
                 sys.executable, "-m", "sprout_refbuilder.cli", "expand-genus-branches",
                 "--plan", str(branch_plan),
                 "--evidence", str(branch_results / "candidate_evidence.csv"),
-                "--output", str(genus_allowed),
+                "--output", str(next_allowed),
                 "--report", str(branch_dir / "expansion.json"),
             ])
         expanded = json.loads((branch_dir / "expansion.json").read_text(encoding="utf-8"))
-        say(
-            f"{sample}/branch: {expanded['mode']} selected "
-            f"{expanded['selected_genera']}/{expanded['total_genera']} genera"
+        remaining = expanded["selected_genera"]
+        say(f"{sample}/branch round {round_number}: {remaining}/{source_count} genera retained")
+        genus_allowed = next_allowed
+        if remaining >= source_count or remaining <= args.max_final_genera:
+            break
+
+    remaining_count = (
+        len(genus_allowed.read_text(encoding="utf-8").splitlines())
+        if genus_allowed is not None else len(plan["all_genera"])
+    )
+    if remaining_count > args.max_postscreen_genera:
+        reason = (
+            f"Tree screening stopped at {remaining_count} genera, above the "
+            f"{args.max_postscreen_genera}-genus post-screen limit; no full-panel fallback"
+        )
+        unresolved = {
+            "status": "genus_unresolved_overflow",
+            "remaining_genera": remaining_count,
+            "limit": args.max_postscreen_genera,
+            "reason": reason,
+        }
+        (branch_root / "UNRESOLVED.json").write_text(
+            json.dumps(unresolved, indent=2), encoding="utf-8"
+        )
+        summary = sample_dir / "RESULT.txt"
+        summary.write_text(
+            f"sample={sample}\n"
+            f"order={','.join((order / 'candidates.txt').read_text().splitlines())}\n"
+            f"family={','.join((family / 'candidates.txt').read_text().splitlines())}\n"
+            f"genus_status=unresolved_overflow\nremaining_genera={remaining_count}\n"
+            f"reason={reason}\n",
+            encoding="utf-8",
+        )
+        run_command([
+            sys.executable, str(args.repo / "examples/hpc/export_sample_report.py"),
+            "--sample-dir", str(sample_dir), "--sprout", str(args.sprout),
+        ])
+        say(f"{sample}: {reason}")
+        return summary.read_text(encoding="utf-8").strip()
+    if genus_allowed is None and remaining_count > args.max_final_genera:
+        genus_allowed = branch_root / "all_small_genera.txt"
+        genus_allowed.write_text(
+            "".join(f"{name}\n" for name in plan["all_genera"]), encoding="utf-8"
         )
     if genus_allowed is not None:
         allowed_count = len(genus_allowed.read_text(encoding="utf-8").splitlines())
-        if allowed_count > args.genus_shard_size:
+        if allowed_count > args.max_final_genera:
             shard_root = sample_dir / "genus_shards"
             shard_plan = shard_root / "shards.json"
             if not shard_plan.exists():
+                if branch_plan is None:
+                    raise RuntimeError("Genus shard planning requires a tree plan")
                 run_command([
                     sys.executable, "-m", "sprout_refbuilder.cli", "plan-genus-shards",
                     "--plan", str(branch_plan),
@@ -485,16 +544,27 @@ def main() -> int:
     parser.add_argument("--max-parallel-shards", type=int, default=2)
     parser.add_argument("--max-final-genera", type=int, default=80)
     parser.add_argument(
+        "--max-branch-rounds", type=int, default=5,
+        help="Maximum coarse-to-fine tree screens before reporting unresolved overflow",
+    )
+    parser.add_argument(
+        "--max-postscreen-genera", type=int, default=160,
+        help="Maximum remaining genera eligible for small final shards",
+    )
+    parser.add_argument(
         "--branch-threshold", type=int, default=120,
-        help="Screen Kew tree branches when the genus pool exceeds this many recovery FASTAs",
+        help="Screen Kew tree branches when the genus count exceeds this limit",
     )
     parser.add_argument("--conda-env", default="sprout")
     args = parser.parse_args()
     if min(
         args.max_parallel_samples, args.max_parallel_shards, args.poll_seconds,
         args.branch_threshold, args.genus_shard_size, args.max_final_genera,
+        args.max_branch_rounds, args.max_postscreen_genera,
     ) < 1:
         parser.error("Parallel counts, limits, and poll interval must be positive")
+    if args.max_postscreen_genera < args.max_final_genera:
+        parser.error("--max-postscreen-genera must be at least --max-final-genera")
     for path in (args.sample_root, args.repo, args.sprout, args.backbone):
         if not path.exists():
             parser.error(f"Required path does not exist: {path}")

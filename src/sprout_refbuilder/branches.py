@@ -1,4 +1,4 @@
-"""Conservative, tree-guided screening for unusually large genus panels."""
+"""Progressive, tree-guided screening for large genus panels."""
 
 from __future__ import annotations
 
@@ -28,14 +28,18 @@ def plan_genus_branches(
     output: Path,
     *,
     threshold: int = 120,
-    max_group_genera: int = 20,
+    max_group_genera: int = 40,
     max_anchor_genera: int = 120,
+    max_branches_per_family: int = 6,
+    allowed_genera_file: Path | None = None,
 ) -> dict:
-    """Count the exact genus pool and choose divergent anchors per tree branch.
+    """Cut each large family into a few coarse tree groups for one screen round.
 
-    This reads only Kew metadata and its species tree. It does not download recovery
-    FASTAs, so a small family can proceed directly to the ordinary genus panel.
+    A subsequent round can use ``allowed_genera_file`` to subdivide only the
+    previously retained groups. This reads metadata and the tree, not FASTAs.
     """
+    if min(threshold, max_group_genera, max_anchor_genera, max_branches_per_family) < 1:
+        raise ValueError("Tree-screen limits must be positive")
     parents = read_taxon_candidates(parent_file)
     if not parents:
         raise ValueError("The family candidate file is empty")
@@ -47,23 +51,37 @@ def plan_genus_branches(
     candidates = builder._records_in_parents(
         "genus", {name.casefold() for name in parents}, client.records(), indexed
     )
+    allowed = None
+    if allowed_genera_file is not None:
+        allowed = set(read_taxon_candidates(allowed_genera_file))
+        if not allowed:
+            raise ValueError("The allowed genus file is empty")
+        candidates = [
+            (record, taxonomy) for record, taxonomy in candidates
+            if taxonomy.genus in allowed
+        ]
     pools = builder._balanced_pools("genus", candidates)
     pool_records = sum(len(rows) for rows in pools.values())
     all_genera = sorted(pools)
+    if allowed is not None and allowed - set(all_genera):
+        raise ValueError("Allowed genera are missing from the selected Kew families")
     report: dict = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kew_release": client.sync().get("release", "unknown"),
         "parent_families": parents,
         "trigger_threshold": threshold,
         "pool_records": pool_records,
         "candidate_genera": len(all_genera),
         "all_genera": all_genera,
+        "max_group_genera": max_group_genera,
+        "max_branches_per_family": max_branches_per_family,
         "triggered": False,
         "branches": [],
         "anchor_genera": [],
+        "passthrough_genera": [],
     }
-    if pool_records <= threshold or len(all_genera) < 2:
-        report["reason"] = "candidate pool is below threshold"
+    if len(all_genera) <= threshold or len(all_genera) < 2:
+        report["reason"] = "candidate genus count is below threshold"
         _write_json(output, report)
         return report
 
@@ -100,7 +118,7 @@ def plan_genus_branches(
         ): record
         for record, taxonomy in candidates
     }
-    family_tips: dict[str, list] = defaultdict(list)
+    family_tips: dict[str, dict[str, object]] = defaultdict(dict)
     tip_record: dict[int, object] = {}
     for tip in tree.get_terminals():
         fields = _tip_fields(tip.name)
@@ -111,64 +129,102 @@ def plan_genus_branches(
             (family.casefold(), genus.casefold(), sequence_id.casefold())
         )
         if record is not None:
-            family_tips[family].append(tip)
+            family_tips[family].setdefault(genus, tip)
             tip_record[id(tip)] = record
 
+    large_families = [
+        family for family in parents
+        if len(family_tips.get(family, {})) > max_group_genera
+    ]
+    if large_families and max_anchor_genera < 2 * len(large_families):
+        raise ValueError("Anchor budget cannot cover two anchors per large family")
+    family_group_limit = min(
+        max_branches_per_family,
+        max(1, max_anchor_genera // (2 * max(1, len(large_families)))),
+    )
     branch_nodes = []
+    passthrough = set()
     for family in parents:
-        tips = family_tips.get(family, [])
+        tips = list(family_tips.get(family, {}).values())
         if not tips:
             continue
+        if len(tips) <= max_group_genera:
+            passthrough.update(family_tips[family])
+            continue
         family_root = tree.common_ancestor(tips)
-        descendant_genera: dict[int, set[str]] = {}
         descendant_tips: dict[int, list] = {}
+        selected_ids = {id(tip) for tip in tips}
 
-        def collect(
-            node,
-            descendant_genera=descendant_genera,
-            descendant_tips=descendant_tips,
-        ) -> set[str]:
+        def collect(node) -> list:
             if node.is_terminal():
-                record = tip_record.get(id(node))
-                names = {record.species.split()[0]} if record is not None else set()
-                descendants = [node] if record is not None else []
+                descendants = [node] if id(node) in selected_ids else []
             else:
-                names = set()
                 descendants = []
                 for child in node.clades:
-                    names.update(collect(child))
-                    descendants.extend(descendant_tips[id(child)])
-            descendant_genera[id(node)] = names
+                    descendants.extend(collect(child))
             descendant_tips[id(node)] = descendants
-            return names
+            return descendants
 
         collect(family_root)
 
-        def cut(node, limit: int, descendant_genera=descendant_genera) -> list:
-            names = descendant_genera[id(node)]
-            if not names:
-                return []
-            if len(names) <= limit or node.is_terminal():
-                return [node]
-            return [part for child in node.clades for part in cut(child, limit)]
+        def group_tips(nodes: list) -> list:
+            return [tip for node in nodes for tip in descendant_tips[id(node)]]
 
-        limit = max_group_genera
-        groups = cut(family_root, limit)
-        while len(groups) * 2 > max_anchor_genera and limit < len(all_genera):
-            limit += 5
-            groups = cut(family_root, limit)
-        branch_nodes.extend((family, group, descendant_tips[id(group)]) for group in groups)
+        def split(nodes: list) -> tuple[list, list] | None:
+            parts = nodes
+            while len(parts) == 1:
+                children = [
+                    child for child in parts[0].clades
+                    if descendant_tips.get(id(child))
+                ]
+                if len(children) == 1:
+                    parts = children
+                elif len(children) > 1:
+                    parts = children
+                    break
+                else:
+                    return None
+            if len(parts) < 2:
+                return None
+            bins: tuple[list, list] = ([], [])
+            weights = [0, 0]
+            for part in sorted(
+                parts,
+                key=lambda node: (-len(descendant_tips[id(node)]), str(node.name or "")),
+            ):
+                side = 0 if weights[0] <= weights[1] else 1
+                bins[side].append(part)
+                weights[side] += len(descendant_tips[id(part)])
+            return bins
 
-    if not branch_nodes or len(branch_nodes) > max_anchor_genera:
-        report["reason"] = "tree branches could not be screened within anchor budget"
+        groups = [[family_root]]
+        while len(groups) < family_group_limit:
+            choices = [
+                (len(group_tips(group)), index, halves)
+                for index, group in enumerate(groups)
+                if len(group_tips(group)) > max_group_genera
+                if (halves := split(group)) is not None
+            ]
+            if not choices:
+                break
+            _, index, halves = max(choices, key=lambda item: (item[0], -item[1]))
+            groups[index:index + 1] = list(halves)
+        branch_nodes.extend(
+            (family, group_tips(group)) for group in groups
+        )
+
+    if not branch_nodes:
+        report["passthrough_genera"] = sorted(passthrough)
+        report["unplaced_genera"] = sorted(set(all_genera) - passthrough)
+        report["reason"] = "no large family has screenable tree tips"
         _write_json(output, report)
         return report
 
     branch_nodes.sort(
-        key=lambda row: (row[0].casefold(), min(tip_record[id(tip)].species for tip in row[2]))
+        key=lambda row: (row[0].casefold(), min(tip_record[id(tip)].species for tip in row[1]))
     )
     anchors_by_branch: dict[str, list] = {}
-    for index, (family, _, tips) in enumerate(branch_nodes, start=1):
+    for index, (family, tips) in enumerate(branch_nodes, start=1):
         branch_id = f"B{index:03d}"
         by_genus: dict[str, object] = {}
         for tip in tips:
@@ -212,9 +268,11 @@ def plan_genus_branches(
         {genus for branch in report["branches"] for genus in branch["anchor_genera"]}
     )
     covered_genera = {genus for branch in report["branches"] for genus in branch["genera"]}
-    report["unplaced_genera"] = sorted(set(all_genera) - covered_genera)
+    report["passthrough_genera"] = sorted(passthrough)
+    report["unplaced_genera"] = sorted(set(all_genera) - covered_genera - passthrough)
+    report["family_group_limit"] = family_group_limit
     report["triggered"] = True
-    report["reason"] = "candidate pool exceeds threshold"
+    report["reason"] = "candidate genus count exceeds threshold"
     _write_json(output, report)
     return report
 
@@ -225,91 +283,88 @@ def expand_genus_branches(
     output: Path,
     report_path: Path,
     *,
-    max_selected_branches: int = 8,
+    max_selected_branches_per_family: int = 3,
 ) -> dict:
-    """Keep supported anchor branches and neighbors, or fail open to the full family."""
+    """Keep the strongest supported branches per family, never all genera by default.
+
+    Anchor panels are coarse screens, not final genus calls. A weak family can
+    retain two exploratory branches, but the report marks that evidence weak.
+    """
+    if max_selected_branches_per_family < 1:
+        raise ValueError("max_selected_branches_per_family must be positive")
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     branches = plan["branches"]
     all_genera = set(plan["all_genera"])
     unplaced_genera = set(plan.get("unplaced_genera", []))
-    selected_branches = set()
-    evidence_by_family: dict[str, list[dict]] = defaultdict(list)
+    passthrough_genera = set(plan.get("passthrough_genera", []))
+    evidence_by_genus: dict[str, dict] = {}
     with evidence_csv.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
-            if row.get("selected", "").casefold() != "true":
-                continue
-            genus = row.get("taxon", "")
-            for branch in branches:
-                if genus in branch["anchor_genera"]:
-                    selected_branches.add(branch["id"])
-                    evidence_by_family[branch["family"]].append(row)
+            if row.get("taxon"):
+                evidence_by_genus[row["taxon"]] = row
+
+    def metric(row: dict, key: str) -> float:
+        try:
+            return float(row.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
     by_family: dict[str, list] = defaultdict(list)
     for branch in branches:
         by_family[branch["family"]].append(branch)
-    dominant_families = []
-    for family, rows in evidence_by_family.items():
-        # The general candidate selector intentionally keeps weak secondary calls. If one
-        # anchor is overwhelmingly supported, those weak calls should not force a full
-        # family-wide MAFFT panel. Diffuse evidence still fails open to the full family.
-        def metric(row: dict, key: str) -> float:
-            try:
-                return float(row.get(key) or 0)
-            except ValueError:
-                return 0.0
-
-        try:
-            ranked = sorted(rows, key=lambda row: metric(row, "aggregate_score"), reverse=True)
-            top = ranked[0]
-            top_score = metric(top, "aggregate_score")
-            runner_up = metric(ranked[1], "aggregate_score") if len(ranked) > 1 else 0.0
-            top_votes = metric(top, "locus_votes")
-            top_z = metric(top, "aggregate_z")
-        except IndexError:
-            continue
-        if top_z < 3 or top_votes < 10 or top_score < 2 * runner_up:
-            continue
-        vote_floor = max(3, round(top_votes * 0.1))
-        supported = {
-            row["taxon"] for row in ranked
-            if row is top or (
-                metric(row, "aggregate_score") >= 0.25 * top_score
-                and metric(row, "locus_votes") >= vote_floor
-            )
-        }
-        family_ids = {branch["id"] for branch in by_family[family]}
-        selected_branches.difference_update(family_ids)
-        selected_branches.update(
-            branch["id"] for branch in by_family[family]
-            if supported.intersection(branch["anchor_genera"])
-        )
-        dominant_families.append(family)
-    missing = [
-        family for family, rows in by_family.items()
-        if not selected_branches.intersection({row["id"] for row in rows})
-    ]
-    if not selected_branches or len(selected_branches) > max_selected_branches or missing:
-        chosen = all_genera
-        mode = "full_fallback"
-    else:
-        retained = selected_branches | {
-            branch["neighbor"] for branch in branches
-            if branch["id"] in selected_branches and branch["neighbor"]
-        }
-        chosen = unplaced_genera | {
-            genus for branch in branches if branch["id"] in retained
-            for genus in branch["genera"]
-        }
-        if len(chosen) > 0.8 * len(all_genera):
-            chosen = all_genera
-            mode = "full_fallback"
+    selected_branches: set[str] = set()
+    weak_families = []
+    family_details = []
+    for family, family_branches in by_family.items():
+        ranked = []
+        for branch in family_branches:
+            rows = [evidence_by_genus.get(name, {}) for name in branch["anchor_genera"]]
+            votes = sum(metric(row, "locus_votes") for row in rows)
+            score = max((metric(row, "aggregate_score") for row in rows), default=0.0)
+            selected = any(row.get("selected", "").casefold() == "true" for row in rows)
+            ranked.append((votes, score, selected, branch))
+        ranked.sort(key=lambda item: (-item[0], -item[1], -int(item[2]), item[3]["id"]))
+        top_votes = ranked[0][0]
+        if top_votes > 0:
+            vote_floor = max(2, top_votes * 0.1)
+            supported = [row for row in ranked if row[0] >= vote_floor]
+            picked = supported[:max_selected_branches_per_family]
+            if not picked:
+                picked = ranked[:1]
         else:
-            mode = "branch_screened"
+            weak_families.append(family)
+            marked = [row for row in ranked if row[2]]
+            picked = (
+                marked[:max_selected_branches_per_family]
+                if marked else ranked[:min(2, max_selected_branches_per_family)]
+            )
+        selected_branches.update(row[3]["id"] for row in picked)
+        family_details.append({
+            "family": family,
+            "top_anchor_locus_votes": top_votes,
+            "selected_branches": [row[3]["id"] for row in picked],
+            "weak_evidence": top_votes == 0,
+        })
+
+    retained = selected_branches | {
+        branch["neighbor"] for branch in branches
+        if branch["id"] in selected_branches and branch["neighbor"]
+    }
+    chosen = passthrough_genera | unplaced_genera | {
+        genus for branch in branches if branch["id"] in retained
+        for genus in branch["genera"]
+    }
+    if not chosen or chosen - all_genera:
+        raise RuntimeError("Branch expansion produced an invalid genus subset")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("".join(f"{genus}\n" for genus in sorted(chosen)), encoding="utf-8")
     report = {
-        "mode": mode,
+        "schema_version": 2,
+        "mode": "branch_screened" if len(chosen) < len(all_genera) else "unresolved_no_reduction",
         "selected_anchor_branches": sorted(selected_branches),
-        "dominant_families": sorted(dominant_families),
+        "retained_branches": sorted(retained),
+        "weak_families": sorted(weak_families),
+        "families": family_details,
         "selected_genera": len(chosen),
         "total_genera": len(all_genera),
         "allowed_taxa_file": str(output),

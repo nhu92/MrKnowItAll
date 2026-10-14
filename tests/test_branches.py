@@ -115,11 +115,10 @@ def test_dominant_anchor_narrows_weak_selected_branches(tmp_path: Path) -> None:
     allowed = tmp_path / "allowed.txt"
     result = expand_genus_branches(plan, evidence, allowed, tmp_path / "report.json")
     assert result["mode"] == "branch_screened"
-    assert result["dominant_families"] == ["FamA"]
     assert allowed.read_text(encoding="utf-8").splitlines() == ["Genus0", "Genus1"]
 
 
-def test_diffuse_anchors_keep_full_family_fallback(tmp_path: Path) -> None:
+def test_diffuse_anchors_never_fall_back_to_full_family(tmp_path: Path) -> None:
     branches = [
         {
             "id": f"B{index:03d}", "family": "FamA", "genera": [f"Genus{index}"],
@@ -141,5 +140,69 @@ def test_diffuse_anchors_keep_full_family_fallback(tmp_path: Path) -> None:
     result = expand_genus_branches(
         plan, evidence, tmp_path / "allowed.txt", tmp_path / "report.json"
     )
-    assert result["mode"] == "full_fallback"
-    assert result["selected_genera"] == 10
+    assert result["mode"] == "branch_screened"
+    assert result["selected_genera"] == 3
+    assert (tmp_path / "allowed.txt").read_text().splitlines() == [
+        "Genus0", "Genus1", "Genus2",
+    ]
+
+
+def test_large_family_is_cut_progressively_without_global_anchor_fallback(
+    tmp_path: Path,
+) -> None:
+    backbone = tmp_path / "backbone"
+    backbone.mkdir()
+    (backbone / "4691.fasta").write_text(
+        ">Rosales_FamA_GenusA_species_X\nATGACG\n", encoding="utf-8"
+    )
+    parents = tmp_path / "parents.txt"
+    parents.write_text("FamA\n", encoding="utf-8")
+    root = tmp_path / "kew"
+    root.mkdir()
+    tree = root / "tree.nwk"
+    genera = [f"Genus{i:02d}" for i in range(24)]
+    tips = [f"Rosales_FamA_{genus}_species_{i:02d}" for i, genus in enumerate(genera)]
+    tree.write_text("(" + ",".join(tips) + ");\n", encoding="utf-8")
+
+    class ManyKew:
+        def fetch_species_tree(self) -> Path:
+            return tree
+
+        def records(self) -> list[KewRecord]:
+            return [
+                KewRecord("INSDC", f"{i:02d}", "read", f"{genus} species", "PAFTOL", f"{i}.fasta")
+                for i, genus in enumerate(genera)
+            ]
+
+        def sync(self) -> dict:
+            return {"release": "test"}
+
+    client = ManyKew()
+    plan_path = tmp_path / "round1.json"
+    plan = plan_genus_branches(
+        client, backbone, parents, plan_path,
+        threshold=8, max_group_genera=4, max_anchor_genera=8,
+        max_branches_per_family=4,
+    )
+    assert plan["triggered"]
+    assert len(plan["branches"]) == 4
+    assert len(plan["anchor_genera"]) <= 8
+    assert {genus for branch in plan["branches"] for genus in branch["genera"]} == set(genera)
+
+    winner = plan["branches"][0]["anchor_genera"][0]
+    evidence = tmp_path / "evidence.csv"
+    evidence.write_text(
+        "taxon,selected,locus_votes,aggregate_score\n"
+        f"{winner},True,20,100\n", encoding="utf-8"
+    )
+    allowed = tmp_path / "allowed.txt"
+    expanded = expand_genus_branches(
+        plan_path, evidence, allowed, tmp_path / "expanded.json"
+    )
+    assert 0 < expanded["selected_genera"] < len(genera)
+    second = plan_genus_branches(
+        client, backbone, parents, tmp_path / "round2.json",
+        threshold=8, max_group_genera=4, max_anchor_genera=8,
+        max_branches_per_family=4, allowed_genera_file=allowed,
+    )
+    assert set(second["all_genera"]) == set(allowed.read_text().splitlines())

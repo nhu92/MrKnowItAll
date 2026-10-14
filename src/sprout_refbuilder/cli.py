@@ -145,8 +145,10 @@ def parser() -> argparse.ArgumentParser:
     branch_plan.add_argument("--backbone", required=True, type=Path)
     branch_plan.add_argument("--output", required=True, type=Path)
     branch_plan.add_argument("--threshold", type=int, default=120)
-    branch_plan.add_argument("--max-group-genera", type=int, default=20)
+    branch_plan.add_argument("--max-group-genera", type=int, default=40)
     branch_plan.add_argument("--max-anchor-genera", type=int, default=120)
+    branch_plan.add_argument("--max-branches-per-family", type=int, default=6)
+    branch_plan.add_argument("--allowed-genera-file", type=Path)
 
     branch_expand = commands.add_parser(
         "expand-genus-branches", help="Expand supported anchor branches to a genus list"
@@ -365,6 +367,8 @@ def main(argv: list[str] | None = None) -> int:
                 threshold=args.threshold,
                 max_group_genera=args.max_group_genera,
                 max_anchor_genera=args.max_anchor_genera,
+                max_branches_per_family=args.max_branches_per_family,
+                allowed_genera_file=args.allowed_genera_file,
             )
             print(json.dumps({key: value for key, value in report.items() if key != "branches"}, indent=2))
             return 0
