@@ -92,8 +92,8 @@ python -m sprout_refbuilder.cli select-candidates \
   --minimum-locus-votes "$MIN_LOCUS_VOTES" --minimum-z 0 \
   --always-top 1 --max-candidates "$MAX_CANDIDATES" \
   --output candidates.txt --report candidate_evidence.csv
-stage_id=$LEVEL
-if [[ -n "$ALLOWED_TAXA_FILE" && "$LEVEL" == genus && "$REPRESENTATIVES" == 1 ]]; then
+stage_id=${SPROUT_STAGE_ID:-$LEVEL}
+if [[ -z "${SPROUT_STAGE_ID:-}" && -n "$ALLOWED_TAXA_FILE" && "$LEVEL" == genus && "$REPRESENTATIVES" == 1 ]]; then
   stage_id=branch
 fi
 python "$SPROUT_SOURCE/export_pea.py" stage \

@@ -14,6 +14,29 @@ import sys
 from pathlib import Path
 
 
+def stage_file_for_merge(stage_file: Path, stage_id: str, sample_dir: Path) -> Path:
+    """Give older branch rounds distinct IDs without changing their source files."""
+    payload = json.loads(stage_file.read_text(encoding="utf-8"))
+    stages = payload.get("stages")
+    if not isinstance(stages, list) or len(stages) != 1:
+        raise ValueError(f"Expected one stage in {stage_file}")
+    current_id = stages[0].get("id")
+    if current_id == stage_id:
+        return stage_file
+    if current_id != "branch" or not stage_id.startswith("branch_round_"):
+        raise ValueError(
+            f"Unexpected stage ID in {stage_file}: {current_id!r} (expected {stage_id!r})"
+        )
+    stages[0]["id"] = stage_id
+    override = sample_dir / "report_stage_overrides" / f"{stage_id}.pea.json"
+    override.parent.mkdir(exist_ok=True)
+    override.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False),
+        encoding="utf-8",
+    )
+    return override
+
+
 def export_sample(sample_dir: Path, sprout: Path) -> tuple[Path, Path]:
     exporter = sprout / "export_pea.py"
     if not exporter.is_file():
@@ -65,7 +88,7 @@ def export_sample(sample_dir: Path, sprout: Path) -> tuple[Path, Path]:
                 if (results / name).is_file():
                     command.extend([flag, str(results / name)])
             subprocess.run(command, check=True)
-        stage_files.append(stage_file)
+        stage_files.append(stage_file_for_merge(stage_file, stage_id, sample_dir))
     if not stage_files:
         raise RuntimeError(f"No completed stages in {sample_dir}")
     package = sample_dir / "RESULT.pea.json.gz"

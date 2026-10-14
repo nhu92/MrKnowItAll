@@ -389,6 +389,7 @@ def process_sample(
                 "SPROUT_ALLOWED_TAXA_FILE": str(anchor_file),
                 "SPROUT_REF_REPRESENTATIVES": "1",
                 "SPROUT_REF_POOL_MULTIPLIER": "1",
+                "SPROUT_STAGE_ID": f"branch_round_{round_number:02d}",
             },
             args.refine_memory, args.poll_seconds,
         )
