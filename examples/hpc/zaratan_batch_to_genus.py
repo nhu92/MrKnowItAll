@@ -285,30 +285,53 @@ def process_sample(
     common = common_environment(args, project)
     scripts = args.repo / "examples" / "hpc"
     order_dir = sample_dir / "order"
-    order = submit_stage(
-        f"{sample}/order", scripts / "zaratan_query_order.sbatch", order_dir,
-        common | {
-            "SPROUT_READ1": str(reads[0]),
-            "SPROUT_READ2": str(reads[1]),
-            "SPROUT_STAGE_OUTPUT": str(order_dir / "results"),
-        },
-        args.order_memory, args.poll_seconds,
-    )
+    old_sample = args.reuse_upstream_from / sample if args.reuse_upstream_from else None
+    old_order = old_sample / "order" / "results" if old_sample else None
+    if old_order is not None and (old_order / "SUCCESS").is_file():
+        order = old_order
+        say(f"{sample}/order: reusing completed upstream result at {order}")
+    else:
+        order = submit_stage(
+            f"{sample}/order", scripts / "zaratan_query_order.sbatch", order_dir,
+            common | {
+                "SPROUT_READ1": str(reads[0]),
+                "SPROUT_READ2": str(reads[1]),
+                "SPROUT_STAGE_OUTPUT": str(order_dir / "results"),
+            },
+            args.order_memory, args.poll_seconds,
+        )
     family_dir = sample_dir / "family"
-    prefetch(
-        f"{sample}/family", "family", order / "candidates.txt",
-        family_dir / "prefetch.json", args.cache, args.backbone,
-    )
-    family = submit_stage(
-        f"{sample}/family", scripts / "zaratan_refine_stage.sbatch", family_dir,
-        common | {
-            "SPROUT_LEVEL": "family",
-            "SPROUT_PARENT_FILE": str(order / "candidates.txt"),
-            "SPROUT_QUERY_EXON": str(order / "exon"),
-            "SPROUT_QUERY_GENE_LIST": str(order / "gene_list.txt"),
-            "SPROUT_STAGE_OUTPUT": str(family_dir / "results"),
-        },
-        args.refine_memory, args.poll_seconds,
+    old_family_dir = old_sample / "family" if old_sample else None
+    old_family = old_family_dir / "results" if old_family_dir else None
+    if old_family is not None and (old_family / "SUCCESS").is_file():
+        family = old_family
+        say(f"{sample}/family: reusing completed upstream result at {family}")
+    elif old_family_dir is not None and (old_family_dir / "JOB_ID").is_file():
+        old_job_id = (old_family_dir / "JOB_ID").read_text(encoding="utf-8").strip()
+        if not re.fullmatch(r"\d+", old_job_id):
+            raise RuntimeError(f"{sample}/family: invalid upstream job ID")
+        say(f"{sample}/family: waiting for existing upstream job {old_job_id}")
+        wait_for_stage(f"{sample}/family", old_job_id, old_family, args.poll_seconds)
+        family = old_family
+    else:
+        prefetch(
+            f"{sample}/family", "family", order / "candidates.txt",
+            family_dir / "prefetch.json", args.cache, args.backbone,
+        )
+        family = submit_stage(
+            f"{sample}/family", scripts / "zaratan_refine_stage.sbatch", family_dir,
+            common | {
+                "SPROUT_LEVEL": "family",
+                "SPROUT_PARENT_FILE": str(order / "candidates.txt"),
+                "SPROUT_QUERY_EXON": str(order / "exon"),
+                "SPROUT_QUERY_GENE_LIST": str(order / "gene_list.txt"),
+                "SPROUT_STAGE_OUTPUT": str(family_dir / "results"),
+            },
+            args.refine_memory, args.poll_seconds,
+        )
+    (sample_dir / "UPSTREAM_SOURCES.json").write_text(
+        json.dumps({"order_results": str(order), "family_results": str(family)}, indent=2),
+        encoding="utf-8",
     )
     branch_root = sample_dir / "branch"
     branch_root.mkdir(exist_ok=True)
@@ -529,8 +552,16 @@ def main() -> int:
     parser.add_argument("--sprout", required=True, type=Path)
     parser.add_argument("--backbone", required=True, type=Path)
     parser.add_argument("--cache", required=True, type=Path)
+    parser.add_argument(
+        "--reuse-upstream-from", type=Path,
+        help="Reuse completed order/family results (and wait for a recorded family job) from an earlier run",
+    )
     parser.add_argument("--sample", action="append", default=[])
     parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument(
+        "--validate-only", action="store_true",
+        help="Check selected FASTQ pairs and upstream reuse without creating directories or submitting jobs",
+    )
     parser.add_argument(
         "--submit-orders-only", action="store_true",
         help="Queue every selected sample's independent order job, then exit",
@@ -568,10 +599,27 @@ def main() -> int:
     for path in (args.sample_root, args.repo, args.sprout, args.backbone):
         if not path.exists():
             parser.error(f"Required path does not exist: {path}")
+    if args.reuse_upstream_from is not None and not args.reuse_upstream_from.is_dir():
+        parser.error(f"Upstream run root does not exist: {args.reuse_upstream_from}")
+    if args.reuse_upstream_from is not None and args.reuse_upstream_from.resolve() == args.run_root.resolve():
+        parser.error("--reuse-upstream-from must differ from --run-root")
     os.environ["PYTHONPATH"] = str(args.repo / "src") + os.pathsep + os.environ.get(
         "PYTHONPATH", ""
     )
     pairs = sample_pairs(args.sample_root, set(args.sample), set(args.exclude))
+    if args.validate_only:
+        for sample, reads in pairs.items():
+            old = args.reuse_upstream_from / sample if args.reuse_upstream_from else None
+            order_done = bool(old and (old / "order" / "results" / "SUCCESS").is_file())
+            family_done = bool(old and (old / "family" / "results" / "SUCCESS").is_file())
+            family_job = bool(old and (old / "family" / "JOB_ID").is_file())
+            say(
+                f"{sample}: R1={reads[0].name} R2={reads[1].name}; "
+                f"order={'reuse' if order_done else 'new'}; "
+                f"family={'reuse' if family_done else 'wait' if family_job else 'new'}"
+            )
+        say(f"Validated {len(pairs)} sample workflows; no jobs submitted")
+        return 0
     args.run_root.mkdir(parents=True, exist_ok=True)
     args.cache.mkdir(parents=True, exist_ok=True)
     if args.submit_orders_only:

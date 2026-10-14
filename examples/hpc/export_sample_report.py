@@ -8,6 +8,7 @@ backfilled from their rankings, with gene evidence explicitly marked unavailable
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -19,9 +20,14 @@ def export_sample(sample_dir: Path, sprout: Path) -> tuple[Path, Path]:
         raise FileNotFoundError(f"SPrOUT exporter not found: {exporter}")
     project = sample_dir.name.lower()
     stage_files = []
+    upstream_file = sample_dir / "UPSTREAM_SOURCES.json"
+    upstream = (
+        json.loads(upstream_file.read_text(encoding="utf-8"))
+        if upstream_file.is_file() else {}
+    )
     stages = [
-        ("order", "order", 0.9, sample_dir / "order" / "results"),
-        ("family", "family", 0.0, sample_dir / "family" / "results"),
+        ("order", "order", 0.9, Path(upstream.get("order_results", sample_dir / "order" / "results"))),
+        ("family", "family", 0.0, Path(upstream.get("family_results", sample_dir / "family" / "results"))),
     ]
     stages.extend(
         (f"branch_{round_dir.name}", "genus", 0.0, round_dir / "results")
@@ -37,6 +43,10 @@ def export_sample(sample_dir: Path, sprout: Path) -> tuple[Path, Path]:
             continue
         stage_file = results / "stage.pea.json"
         if not stage_file.is_file():
+            if results.parent.parent != sample_dir:
+                export_dir = sample_dir / "upstream_exports"
+                export_dir.mkdir(exist_ok=True)
+                stage_file = export_dir / f"{stage_id}.pea.json"
             predictions = results / "predictions.csv"
             if not predictions.is_file():
                 raise FileNotFoundError(f"Completed stage lacks predictions: {results}")
@@ -45,7 +55,7 @@ def export_sample(sample_dir: Path, sprout: Path) -> tuple[Path, Path]:
                 "--project", project, "--level", level, "--stage-id", stage_id,
                 "--predictions", str(predictions),
                 "--z-threshold", str(z), "--output", str(stage_file),
-                "--markdown", str(results / "stage.report.md"),
+                "--markdown", str(stage_file.parent / f"{stage_id}.report.md"),
             ]
             for flag, name in (
                 ("--evidence", "candidate_evidence.csv"),

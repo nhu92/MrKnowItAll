@@ -100,3 +100,12 @@ of launching a huge alignment. Configure the limits with `--genus-shard-size`,
 Anchor screens appear under `branch/round_XX/`.
 Use a new `--run-root` when upgrading a sample that already has a legacy
 `branch/plan.json`; the controller refuses to mix old and new genus screens.
+Use `--reuse-upstream-from OLD_RUN_ROOT` to reuse completed order and family
+results from an earlier run. If an old family Slurm job already has a `JOB_ID`,
+the new controller waits for it instead of submitting a duplicate. A sample
+without reusable stages starts normally. `UPSTREAM_SOURCES.json` records the
+actual inputs used by each new sample run.
+`--validate-only` prints the selected FASTQ pairs and reuse decisions without
+submitting anything. For the October 2026 eleven-mixture Zaratan batch, the
+reproducible controller command is in `zaratan_real11_hierarchy.sh`; run it in
+`tmux` so that disconnecting SSH does not interrupt orchestration.
