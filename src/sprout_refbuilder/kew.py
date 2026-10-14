@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
+import tempfile
+import threading
+from contextlib import contextmanager
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
 from pathlib import Path
@@ -14,6 +18,36 @@ import httpx
 from .models import KewRecord
 
 DEFAULT_BASE_URL = "https://sftp.kew.org/pub/treeoflife/current_release/"
+_LOCAL_CACHE_LOCK = threading.RLock()
+
+
+@contextmanager
+def _cache_metadata_lock(cache_dir: Path):
+    """Coordinate Kew metadata initialization across threads and HPC processes."""
+    with _LOCAL_CACHE_LOCK:
+        with (cache_dir / ".metadata.lock").open("a+b") as handle:
+            if os.name == "posix":
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if os.name == "posix":
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _atomic_write(destination: Path, content: bytes) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp", delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        handle.write(content)
+    try:
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class _LinkParser(HTMLParser):
@@ -73,35 +107,60 @@ class KewClient:
         return self.cache_dir / "release.json"
 
     def sync(self, force: bool = False) -> dict:
-        if not force and all(
-            p.exists()
-            for p in (self.manifest_path, self.recovery_index_path, self.release_metadata_path)
-        ):
-            return json.loads(self.release_metadata_path.read_text(encoding="utf-8"))
+        with _cache_metadata_lock(self.cache_dir):
+            if not force:
+                cached = self._complete_metadata()
+                if cached is not None:
+                    return cached
 
-        manifest = self._get_text("sequence_manifest.txt")
-        recovery_html = self._get_text("fasta/by_recovery/")
-        root_html = self._get_text("")
-        notes_name = self._find_release_notes(root_html)
-        notes = self._get_text(notes_name)
-        release_match = re.search(r"Release\s+(\d+(?:\.\d+)*)", notes, re.IGNORECASE)
-        release = release_match.group(1) if release_match else "unknown"
+            manifest = self._get_text("sequence_manifest.txt")
+            recovery_html = self._get_text("fasta/by_recovery/")
+            root_html = self._get_text("")
+            notes_name = self._find_release_notes(root_html)
+            notes = self._get_text(notes_name)
+            release_match = re.search(r"Release\s+(\d+(?:\.\d+)*)", notes, re.IGNORECASE)
+            release = release_match.group(1) if release_match else "unknown"
 
-        parser = _LinkParser()
-        parser.feed(recovery_html)
-        files = sorted(
-            href for href in parser.links if href.endswith(".a353.fasta") and "/" not in href
-        )
-        self.manifest_path.write_text(manifest, encoding="utf-8")
-        self.recovery_index_path.write_text(json.dumps(files, indent=2), encoding="utf-8")
-        metadata = {
-            "release": release,
-            "base_url": self.base_url,
-            "recovery_count": len(files),
-            "release_notes": notes_name,
-        }
-        self.release_metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-        return metadata
+            parser = _LinkParser()
+            parser.feed(recovery_html)
+            files = sorted(
+                href for href in parser.links if href.endswith(".a353.fasta") and "/" not in href
+            )
+            _atomic_write(self.manifest_path, manifest.encode("utf-8"))
+            _atomic_write(self.recovery_index_path, json.dumps(files, indent=2).encode("utf-8"))
+            metadata = {
+                "release": release,
+                "base_url": self.base_url,
+                "recovery_count": len(files),
+                "release_notes": notes_name,
+            }
+            _atomic_write(
+                self.release_metadata_path, json.dumps(metadata, indent=2).encode("utf-8")
+            )
+            return metadata
+
+    def _complete_metadata(self) -> dict | None:
+        try:
+            if not all(
+                path.is_file() and path.stat().st_size > 0
+                for path in (self.manifest_path, self.recovery_index_path, self.release_metadata_path)
+            ):
+                return None
+            metadata = json.loads(self.release_metadata_path.read_text(encoding="utf-8"))
+            files = json.loads(self.recovery_index_path.read_text(encoding="utf-8"))
+            if not isinstance(metadata, dict) or not isinstance(files, list):
+                return None
+            required = {"Repository_name", "Sequence_ID", "Sequence_type", "Species_name", "Project_name"}
+            with self.manifest_path.open(encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle, delimiter="\t")
+                if not required.issubset(reader.fieldnames or []):
+                    return None
+                for row in reader:
+                    if any(row.get(field) is None for field in required):
+                        return None
+            return metadata
+        except (OSError, ValueError, TypeError, KeyError, csv.Error):
+            return None
 
     def records(self) -> list[KewRecord]:
         self.sync()
@@ -162,13 +221,16 @@ class KewClient:
         destination.parent.mkdir(parents=True, exist_ok=True)
         response = self.http.get(urljoin(self.base_url, "fasta/by_recovery/" + quote(record.recovery_file)))
         response.raise_for_status()
-        destination.write_bytes(response.content)
+        _atomic_write(destination, response.content)
         return destination
 
     def fetch_species_tree(self) -> Path:
         destination = self.cache_dir / "treeoflife.current.tree"
-        if not destination.exists():
-            destination.write_bytes(self._get_bytes("tree/species/treeoflife.current.tree"))
+        if destination.is_file() and destination.stat().st_size > 0:
+            return destination
+        with _cache_metadata_lock(self.cache_dir):
+            if not destination.is_file() or destination.stat().st_size == 0:
+                _atomic_write(destination, self._get_bytes("tree/species/treeoflife.current.tree"))
         return destination
 
     def _get_text(self, relative: str) -> str:

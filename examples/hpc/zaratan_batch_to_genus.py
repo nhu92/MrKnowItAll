@@ -353,7 +353,11 @@ def process_sample(
             ]
             if genus_allowed is not None:
                 command.extend(["--allowed-genera-file", str(genus_allowed)])
-            run_command(command)
+            # Planning reads/initializes the shared Kew manifest and species tree.
+            # Serialize it with prefetch so concurrent samples never see partial files.
+            with PREFETCH_LOCK:
+                if not branch_plan.exists():
+                    run_command(command)
         plan = json.loads(branch_plan.read_text(encoding="utf-8"))
         source_count = len(plan["all_genera"])
         say(

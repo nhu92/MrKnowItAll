@@ -7,7 +7,7 @@ source /home/nhu/miniconda3/etc/profile.d/conda.sh
 conda activate sprout
 
 work=/scratch/zt1/project/jmeng-prj/user/nhu/mrknowitall_hierarchy_20261013
-repo="$work/repo"
+repo="${MRKNOWITALL_RUN_REPO:-$work/repo}"
 run_root="$work/realmix_runs"
 old_root=/scratch/zt1/project/jmeng-prj/user/nhu/mrknowitall_test_20261013/realmix_runs
 
