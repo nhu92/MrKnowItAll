@@ -72,6 +72,10 @@ The controller discovered exactly 11 paired samples. It submitted these order
 jobs in parallel, then submitted family, branch-screen, shard, and final-genus
 jobs only when each sample's preceding result was available. This is *one
 controller plus many Slurm jobs*, not one giant compute-node job per sample.
+The complete, stage-by-stage record is
+[real11_job_manifest.tsv](examples/hpc/real11_job_manifest.tsv): 80 Slurm submissions,
+75 successful stages and five preserved failed first-order attempts. The
+replacement order jobs and all later stages succeeded.
 
 | Sample | Mix | Initial order job |
 | --- | --- | ---: |
@@ -180,6 +184,30 @@ done
 [SPrOUT-PEA](https://nhu92.github.io/SPrOUT-PEA/). Per-stage rankings,
 candidate evidence, QC, and reference FASTA remain under each sample directory.
 The report contains pruned tree views, not FASTQ or full alignments.
+
+### Final outputs in this run
+
+All 11 samples produced `RESULT.txt`, `RESULT.md`, and a gzip-valid
+`RESULT.pea.json.gz`. A completed workflow does not imply a reliable genus call:
+
+| Sample | Mix | Genus-level outcome |
+| --- | --- | --- |
+| EMseq001 | brassica | Unresolved: 177 genera remain |
+| EMseq002 | prunus | Prunus (evidence and SPrOUT score agree) |
+| EMseq003 | citrus | Citrus (both agree) |
+| EMseq004 | vaccinium | Vaccinium by evidence; Cavendishia by SPrOUT score, so inspect the disagreement |
+| EMseq005 | mix1 | Unresolved: 747 genera remain |
+| EMseq006 | mix2 | Unresolved: 391 genera remain |
+| EMseq007 | mix3 | Zizania (both agree); Ginkgo is outside this angiosperm reference system |
+| EMseq008 | mix5 | Unresolved: 257 genera remain |
+| EMseq009 | mix6 | Unresolved: 302 genera remain |
+| EMseq010 | mix7 | Unresolved: 339 genera remain |
+| EMseq011 | mix8 | Unresolved: 315 genera remain |
+
+`unresolved_overflow` means the tree-guided screen could not get under the
+160-genus post-screen limit. These are not negative calls for the expected
+genera. The workflow deliberately does not align every remaining genus at once
+or force a false winner.
 
 ## Can every non-read input be obtained from GitHub?
 
