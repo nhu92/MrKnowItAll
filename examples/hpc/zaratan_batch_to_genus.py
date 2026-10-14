@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +34,13 @@ TERMINAL_FAILURES = {
 }
 PREFETCH_LOCK = threading.Lock()
 PRINT_LOCK = threading.Lock()
+NUMERIC_THREAD_VARIABLES = (
+    "OPENBLAS_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
 
 
 def say(message: str) -> None:
@@ -41,8 +49,13 @@ def say(message: str) -> None:
 
 
 def run_command(args: list[str], *, cwd: Path | None = None, env: dict | None = None) -> str:
+    command_env = (env if env is not None else os.environ).copy()
+    # Login-node helper commands only need one BLAS thread. Unbounded NumPy
+    # imports can otherwise exhaust Zaratan's per-user process/thread limit.
+    for name in NUMERIC_THREAD_VARIABLES:
+        command_env[name] = "1"
     result = subprocess.run(
-        args, cwd=cwd, env=env, capture_output=True, text=True, check=False
+        args, cwd=cwd, env=command_env, capture_output=True, text=True, check=False
     )
     if result.returncode:
         raise RuntimeError(
@@ -109,6 +122,21 @@ def wait_for_stage(stage: str, job_id: str, result_dir: Path, poll_seconds: int)
         time.sleep(poll_seconds)
 
 
+@contextmanager
+def submission_lock(stage_dir: Path):
+    """Prevent simultaneous controllers from submitting the same Slurm stage."""
+    with (stage_dir / ".submit.lock").open("a+", encoding="utf-8") as handle:
+        if os.name == "posix":
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "posix":
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def submit_stage(
     stage: str,
     source_script: Path,
@@ -118,33 +146,34 @@ def submit_stage(
     poll_seconds: int,
 ) -> Path:
     result_dir = stage_dir / "results"
-    if (result_dir / "SUCCESS").exists():
-        say(f"{stage}: reusing completed result")
-        return result_dir
     stage_dir.mkdir(parents=True, exist_ok=True)
-    (stage_dir / "logs").mkdir(exist_ok=True)
-    script = stage_dir / source_script.name
-    shutil.copy2(source_script, script)
-    job_file = stage_dir / "JOB_ID"
-    if job_file.exists():
-        job_id = job_file.read_text(encoding="utf-8").strip()
-    else:
-        if result_dir.exists():
-            raise RuntimeError(f"{stage}: partial results exist without a recorded job: {result_dir}")
-        env = {
-            key: value for key, value in os.environ.items()
-            if not key.startswith(("SPROUT_", "MRKNOWITALL_"))
-        }
-        env.update(environment)
-        job_id = run_command(
-            ["sbatch", "--parsable", "--export=ALL", f"--mem={memory}", script.name],
-            cwd=stage_dir,
-            env=env,
-        ).split(";")[0]
-        if not re.fullmatch(r"\d+", job_id):
-            raise RuntimeError(f"Unexpected sbatch response: {job_id}")
-        job_file.write_text(job_id + "\n", encoding="utf-8")
-        say(f"{stage}: submitted job {job_id}")
+    with submission_lock(stage_dir):
+        if (result_dir / "SUCCESS").exists():
+            say(f"{stage}: reusing completed result")
+            return result_dir
+        (stage_dir / "logs").mkdir(exist_ok=True)
+        script = stage_dir / source_script.name
+        shutil.copy2(source_script, script)
+        job_file = stage_dir / "JOB_ID"
+        if job_file.exists():
+            job_id = job_file.read_text(encoding="utf-8").strip()
+        else:
+            if result_dir.exists():
+                raise RuntimeError(f"{stage}: partial results exist without a recorded job: {result_dir}")
+            env = {
+                key: value for key, value in os.environ.items()
+                if not key.startswith(("SPROUT_", "MRKNOWITALL_"))
+            }
+            env.update(environment)
+            job_id = run_command(
+                ["sbatch", "--parsable", "--export=ALL", f"--mem={memory}", script.name],
+                cwd=stage_dir,
+                env=env,
+            ).split(";")[0]
+            if not re.fullmatch(r"\d+", job_id):
+                raise RuntimeError(f"Unexpected sbatch response: {job_id}")
+            job_file.write_text(job_id + "\n", encoding="utf-8")
+            say(f"{stage}: submitted job {job_id}")
     wait_for_stage(stage, job_id, result_dir, poll_seconds)
     return result_dir
 
